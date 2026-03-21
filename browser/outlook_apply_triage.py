@@ -203,7 +203,7 @@ JSON.stringify(
 
 def open_move_picker(folder_name: str) -> dict[str, Any]:
     existing = inspect_move_picker(folder_name)
-    if existing.get("ok"):
+    if existing.get("ok") and existing.get("stage") != "different-folder-menuitem":
         return existing
 
     expr = """
@@ -232,9 +232,12 @@ JSON.stringify(
   2
 )
 """.strip()
-    clicked = bridge_json(expr, timeout=15.0) or {}
-    if not clicked.get("ok"):
-        return clicked
+    if existing.get("stage") == "different-folder-menuitem":
+        clicked = {"ok": True, "stage": "different-folder-menuitem"}
+    else:
+        clicked = bridge_json(expr, timeout=15.0) or {}
+        if not clicked.get("ok"):
+            return clicked
 
     for _ in range(6):
         time.sleep(0.2)

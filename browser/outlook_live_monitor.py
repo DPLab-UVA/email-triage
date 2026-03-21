@@ -28,6 +28,7 @@ from outlook_draft_helper import (
 from outlook_night_review import (
     DEFAULT_EVENT_LOG as DEFAULT_NIGHT_REVIEW_EVENT_LOG,
     DEFAULT_STATE as DEFAULT_NIGHT_REVIEW_STATE,
+    open_folder,
     process_cycle as process_night_review_cycle,
     register_pending_message,
 )
@@ -172,9 +173,15 @@ def run_cycle(
 ) -> dict[str, Any]:
     ensure_outlook_session(DEFAULT_BROWSER, DEFAULT_PROFILE, DEFAULT_COOKIE_DOMAINS)
 
-    rows = fetch_recent_messages(screens=screens, limit=limit, recent_only=not include_pinned)
-    triaged, summary = triage_recent_messages(rows, rules_path=rules_path, examples_path=examples_path)
     rules = load_json(rules_path)
+    source_folder = str(rules.get("monitor_source_folder", "Inbox"))
+    scan_screens = max(1, int(rules.get("monitor_scan_screens", 1)))
+    opened = open_folder(source_folder)
+    if not opened.get("ok"):
+        raise BridgeError(f"Could not open Outlook folder {source_folder}: {opened}")
+
+    rows = fetch_recent_messages(screens=scan_screens, limit=limit, recent_only=not include_pinned)
+    triaged, summary = triage_recent_messages(rows, rules_path=rules_path, examples_path=examples_path)
     style_profile = load_style_profile(DEFAULT_STYLE_PROFILE)
     state = load_state(state_path)
     seen = set(state.get("seen_keys", []))
@@ -191,6 +198,7 @@ def run_cycle(
         "night_moved": 0,
         "move_failures": 0,
         "baseline_only": False,
+        "source_folder": source_folder,
         "nightly_digest_folder": folder_name,
         "night_review_restore_folder": restore_folder,
         "events": [],

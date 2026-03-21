@@ -433,10 +433,10 @@ def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
             "attn required",
         ]
     )
-    if message.get("pinned") and not looks_automated_sender(sender):
-        return actionable
     if not triage.get("important"):
         return False
+    if message.get("pinned") and not looks_automated_sender(sender):
+        return actionable
     if category in {"security", "review", "review_invitation", "ticket"}:
         return False
     if looks_automated_sender(sender):
@@ -836,9 +836,7 @@ def command_suggest_folder(args: argparse.Namespace) -> int:
             continue
 
         preview_triage = classify_message_payload(row, rules, examples, style_profile=style_profile)
-        inspect_full = bool(str(preview_triage.get("draft_reply", "")).strip())
-        if row.get("pinned") and args.include_pinned and not looks_automated_sender(str(row.get("from", ""))):
-            inspect_full = True
+        inspect_full = bool(preview_triage.get("important")) and not looks_automated_sender(str(row.get("from", "")))
         if not inspect_full:
             skipped.append(
                 {

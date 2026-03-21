@@ -1,5 +1,7 @@
 {
   "priority_threshold": 4,
+  "monitor_source_folder": "Inbox",
+  "monitor_scan_screens": 1,
   "nightly_digest_hour_local": 21,
   "nightly_digest_folder": "Night Review",
   "night_review_restore_hour_local": 7,
@@ -10,7 +12,15 @@
       "reason": "Tracked Google Flights alerts should notify."
     },
     {
+      "sender_contains": "Google Flights",
+      "reason": "Tracked Google Flights alerts should notify."
+    },
+    {
       "sender_contains": "scholarcitations-noreply@google.com",
+      "reason": "Google Scholar reminders are important."
+    },
+    {
+      "sender_contains": "Google Scholar",
       "reason": "Google Scholar reminders are important."
     },
     {
