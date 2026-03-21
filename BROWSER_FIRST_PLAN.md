@@ -82,6 +82,11 @@ Build one local workflow that can:
   - event log: `shared/outlook_monitor_events.jsonl`
   - launchd wrapper: `launchd/outlook_monitor_ctl.sh`
   - tmux wrapper: `browser/outlook_monitor_tmux_ctl.sh`
+- A draft helper now exists for Outlook Web:
+  - helper script: `browser/outlook_draft_helper.py`
+  - suggestion log: `shared/outlook_draft_suggestions.jsonl`
+  - feedback log: `shared/outlook_draft_feedback.jsonl`
+  - supports selected-message extraction, reply draft injection, and send-time feedback logging
 - Atlas is now confirmed as a live visible Outlook session holder:
   - the Atlas app already has logged-in Outlook tabs
   - helper file: `browser/atlas_outlook_helper.py`

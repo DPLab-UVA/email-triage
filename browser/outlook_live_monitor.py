@@ -18,6 +18,7 @@ from outlook_apply_triage import (
     folder_exists,
     move_message_to_folder,
 )
+from outlook_draft_helper import DEFAULT_SUGGESTIONS, save_suggestion
 from outlook_recent_triage import (
     SHARED,
     fetch_recent_messages,
@@ -152,6 +153,7 @@ def run_cycle(
     bootstrap_seen: bool,
     max_seen: int,
     max_retries: int,
+    suggestions_path: Path,
 ) -> dict[str, Any]:
     ensure_outlook_session(DEFAULT_BROWSER, DEFAULT_PROFILE, DEFAULT_COOKIE_DOMAINS)
 
@@ -208,6 +210,15 @@ def run_cycle(
             clear_attempt(state, key)
         elif row.get("bucket") == "important_notify":
             event["action"] = "notify"
+            event["draft_suggestion"] = save_suggestion(
+                suggestions_path,
+                {
+                    **row,
+                    "body_full": row.get("body", ""),
+                },
+                row.get("triage", {}),
+                source="live-monitor",
+            )
             if notify:
                 notified = notify_user(row, str(row.get("reason", "")))
                 event["status"] = "notified" if notified else "notify-failed"
@@ -267,6 +278,7 @@ def command_run_once(args: argparse.Namespace) -> int:
         bootstrap_seen=not args.no_bootstrap_seen,
         max_seen=args.max_seen,
         max_retries=args.max_retries,
+        suggestions_path=Path(args.suggestions),
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
@@ -288,6 +300,7 @@ def command_watch(args: argparse.Namespace) -> int:
                 bootstrap_seen=not args.no_bootstrap_seen,
                 max_seen=args.max_seen,
                 max_retries=args.max_retries,
+                suggestions_path=Path(args.suggestions),
             )
             print(json.dumps(payload, ensure_ascii=False), flush=True)
         except KeyboardInterrupt:
@@ -329,6 +342,7 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--state", default=str(DEFAULT_STATE))
         subparser.add_argument("--event-log", default=str(DEFAULT_EVENT_LOG))
         subparser.add_argument("--action-log", default=str(DEFAULT_ACTION_LOG))
+        subparser.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
         subparser.add_argument("--no-notify", action="store_true")
         subparser.add_argument("--no-bootstrap-seen", action="store_true")
         subparser.add_argument("--max-seen", type=int, default=500)
