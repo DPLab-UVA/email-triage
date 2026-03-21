@@ -82,6 +82,14 @@ Build one local workflow that can:
   - event log: `shared/outlook_monitor_events.jsonl`
   - launchd wrapper: `launchd/outlook_monitor_ctl.sh`
   - tmux wrapper: `browser/outlook_monitor_tmux_ctl.sh`
+- A Night Review queue manager now exists:
+  - helper script: `browser/outlook_night_review.py`
+  - state file: `shared/outlook_night_review_state.json`
+  - event log: `shared/outlook_night_review_events.jsonl`
+  - supports:
+    - bootstrapping existing `Night Review` mail into pending state
+    - one nightly reminder for pending low-priority mail
+    - next-morning restore to `Inbox` if the carried-over Night Review items are all read
 - A draft helper now exists for Outlook Web:
   - helper script: `browser/outlook_draft_helper.py`
   - suggestion log: `shared/outlook_draft_suggestions.jsonl`
@@ -112,3 +120,4 @@ Build one local workflow that can:
 - Headless browser sessions may not share Chrome login state automatically.
 - Webmail DOM can drift, so selectors must be robust.
 - Send-tracking must avoid false positives when the user discards or rewrites heavily.
+- Night Review restore is driven by Outlook's read/unread state, so if a message stays unread it will remain queued instead of being restored.

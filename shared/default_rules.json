@@ -2,6 +2,8 @@
   "priority_threshold": 4,
   "nightly_digest_hour_local": 21,
   "nightly_digest_folder": "Night Review",
+  "night_review_restore_hour_local": 7,
+  "night_review_restore_folder": "Inbox",
   "force_important": [
     {
       "sender_contains": "noreply-travel@google.com",
@@ -41,6 +43,10 @@
     }
   ],
   "force_not_important": [
+    {
+      "sender_contains": "UVA Bookstores",
+      "reason": "Bookstore broadcasts should wait for nightly review and never auto-draft."
+    },
     {
       "sender_contains": "hotcrp@cs.uchicago.edu",
       "subject_contains": "Submitted review #",

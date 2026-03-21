@@ -78,6 +78,9 @@ def parse_option(row: dict[str, Any]) -> dict[str, Any] | None:
         "selected": bool(row.get("selected")),
         "group_header": row.get("group_header", ""),
         "pinned": bool(row.get("pinned")),
+        "unread": bool(row.get("unread")),
+        "mark_action": row.get("mark_action", ""),
+        "aria_label": row.get("aria_label", ""),
         "from": sender,
         "subject": subject,
         "received_at": received_at,
@@ -93,6 +96,7 @@ JSON.stringify(
     const itemList = document.querySelector('[data-testid="virtuoso-item-list"]');
     const wrappers = itemList ? Array.from(itemList.querySelectorAll(':scope > div[data-index]')) : [];
     let currentHeader = '';
+    const normalize = (value) => (value || '').replace(/[\\uE000-\\uF8FF]/g, ' ').replace(/\\s+/g, ' ').trim();
     const rows = [];
     for (const wrapper of wrappers) {
       const header = wrapper.querySelector('[id^="groupHeader"] .PukTV');
@@ -101,6 +105,11 @@ JSON.stringify(
       }
       const el = wrapper.querySelector('[role="option"]');
       if (!el) continue;
+      const markTarget = Array.from(el.querySelectorAll('[title],[aria-label]')).find((candidate) => {
+        const label = normalize(candidate.getAttribute('title') || candidate.getAttribute('aria-label') || '');
+        return /^Mark as (read|unread)$/i.test(label);
+      });
+      const markAction = normalize(markTarget ? (markTarget.getAttribute('title') || markTarget.getAttribute('aria-label') || '') : '');
       rows.push({
         index: rows.length,
         dom_id: el.id || '',
@@ -108,6 +117,9 @@ JSON.stringify(
         selected: el.getAttribute('aria-selected') === 'true',
         group_header: currentHeader,
         pinned: currentHeader === 'Pinned',
+        unread: /^Mark as read$/i.test(markAction),
+        mark_action: markAction,
+        aria_label: normalize(el.getAttribute('aria-label') || ''),
         raw_text: el.innerText || el.textContent || ''
       });
     }

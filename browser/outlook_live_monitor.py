@@ -19,9 +19,16 @@ from outlook_apply_triage import (
     move_message_to_folder,
 )
 from outlook_draft_helper import DEFAULT_SUGGESTIONS, save_suggestion
+from outlook_night_review import (
+    DEFAULT_EVENT_LOG as DEFAULT_NIGHT_REVIEW_EVENT_LOG,
+    DEFAULT_STATE as DEFAULT_NIGHT_REVIEW_STATE,
+    process_cycle as process_night_review_cycle,
+    register_pending_message,
+)
 from outlook_recent_triage import (
     SHARED,
     fetch_recent_messages,
+    load_json,
     triage_recent_messages,
 )
 from outlook_web_workflow import (
@@ -154,14 +161,20 @@ def run_cycle(
     max_seen: int,
     max_retries: int,
     suggestions_path: Path,
+    night_review_state_path: Path,
+    night_review_event_log: Path,
 ) -> dict[str, Any]:
     ensure_outlook_session(DEFAULT_BROWSER, DEFAULT_PROFILE, DEFAULT_COOKIE_DOMAINS)
 
     rows = fetch_recent_messages(screens=screens, limit=limit, recent_only=not include_pinned)
     triaged, summary = triage_recent_messages(rows, rules_path=rules_path, examples_path=examples_path)
+    rules = load_json(rules_path)
     state = load_state(state_path)
     seen = set(state.get("seen_keys", []))
     folder_name = str(summary.get("nightly_digest_folder", "Night Review"))
+    reminder_hour = int(rules.get("nightly_digest_hour_local", 21))
+    restore_hour = int(rules.get("night_review_restore_hour_local", 7))
+    restore_folder = str(rules.get("night_review_restore_folder", "Inbox"))
 
     payload = {
         "timestamp": now_iso(),
@@ -172,6 +185,7 @@ def run_cycle(
         "move_failures": 0,
         "baseline_only": False,
         "nightly_digest_folder": folder_name,
+        "night_review_restore_folder": restore_folder,
         "events": [],
     }
 
@@ -241,6 +255,11 @@ def run_cycle(
                 event["result"] = result
                 if result.get("ok"):
                     event["status"] = "moved"
+                    event["night_review_record"] = register_pending_message(
+                        night_review_state_path,
+                        row,
+                        moved_at=event["timestamp"],
+                    )
                     payload["night_moved"] += 1
                     mark_seen(state, key, max_seen=max_seen)
                     clear_attempt(state, key)
@@ -258,6 +277,17 @@ def run_cycle(
         append_jsonl(event_log, event)
         seen = set(state.get("seen_keys", []))
 
+    payload["night_review"] = process_night_review_cycle(
+        state_path=night_review_state_path,
+        event_log=night_review_event_log,
+        folder_name=folder_name,
+        restore_folder=restore_folder,
+        reminder_hour=reminder_hour,
+        restore_hour=restore_hour,
+        screens=max(2, screens),
+        limit=max(20, limit),
+        notify=notify,
+    )
     state["initialized"] = True
     state["updated_at"] = now_iso()
     state["last_run"] = payload
@@ -279,6 +309,8 @@ def command_run_once(args: argparse.Namespace) -> int:
         max_seen=args.max_seen,
         max_retries=args.max_retries,
         suggestions_path=Path(args.suggestions),
+        night_review_state_path=Path(args.night_review_state),
+        night_review_event_log=Path(args.night_review_event_log),
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
@@ -301,6 +333,8 @@ def command_watch(args: argparse.Namespace) -> int:
                 max_seen=args.max_seen,
                 max_retries=args.max_retries,
                 suggestions_path=Path(args.suggestions),
+                night_review_state_path=Path(args.night_review_state),
+                night_review_event_log=Path(args.night_review_event_log),
             )
             print(json.dumps(payload, ensure_ascii=False), flush=True)
         except KeyboardInterrupt:
@@ -343,6 +377,8 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--event-log", default=str(DEFAULT_EVENT_LOG))
         subparser.add_argument("--action-log", default=str(DEFAULT_ACTION_LOG))
         subparser.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
+        subparser.add_argument("--night-review-state", default=str(DEFAULT_NIGHT_REVIEW_STATE))
+        subparser.add_argument("--night-review-event-log", default=str(DEFAULT_NIGHT_REVIEW_EVENT_LOG))
         subparser.add_argument("--no-notify", action="store_true")
         subparser.add_argument("--no-bootstrap-seen", action="store_true")
         subparser.add_argument("--max-seen", type=int, default=500)
