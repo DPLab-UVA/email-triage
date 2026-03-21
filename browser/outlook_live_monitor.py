@@ -40,6 +40,7 @@ from outlook_recent_triage import (
     load_json,
     triage_recent_messages,
 )
+from outlook_reply_style import DEFAULT_SAMPLES as DEFAULT_STYLE_SAMPLES, refresh_style_profile
 from outlook_web_workflow import (
     DEFAULT_BROWSER,
     DEFAULT_COOKIE_DOMAINS,
@@ -211,6 +212,8 @@ def run_cycle(
     feedback_scan_interval = max(0, int(rules.get("feedback_scan_interval_minutes", 60)))
     feedback_scan_screens = max(1, int(rules.get("feedback_scan_screens", 8)))
     feedback_scan_limit = max(1, int(rules.get("feedback_scan_limit", 40)))
+    style_refresh_screens = max(1, int(rules.get("style_refresh_screens", 20)))
+    style_refresh_limit = max(1, int(rules.get("style_refresh_limit", 80)))
 
     payload = {
         "timestamp": now_iso(),
@@ -347,6 +350,14 @@ def run_cycle(
                 suggestions_path=suggestions_path,
                 feedback_path=feedback_path,
             )
+            if int(payload["draft_feedback_harvest"].get("harvested", 0)) > 0:
+                payload["style_profile_refresh"] = refresh_style_profile(
+                    screens=style_refresh_screens,
+                    limit=style_refresh_limit,
+                    feedback_path=feedback_path,
+                    samples_output=DEFAULT_STYLE_SAMPLES,
+                    profile_output=DEFAULT_STYLE_PROFILE,
+                )
         except Exception as exc:
             payload["draft_feedback_harvest"] = {
                 "status": "error",

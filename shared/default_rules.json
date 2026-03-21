@@ -5,6 +5,8 @@
   "feedback_scan_interval_minutes": 60,
   "feedback_scan_screens": 8,
   "feedback_scan_limit": 40,
+  "style_refresh_screens": 20,
+  "style_refresh_limit": 80,
   "nightly_digest_hour_local": 21,
   "nightly_digest_folder": "Night Review",
   "night_review_restore_hour_local": 7,

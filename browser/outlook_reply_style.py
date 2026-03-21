@@ -190,6 +190,45 @@ def infer_profile(samples: list[dict[str, str]], feedback_rows: list[dict[str, s
     }
 
 
+def sent_samples(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    return [
+        {
+            "from": row.get("from", ""),
+            "subject": row.get("subject", ""),
+            "body": normalize_preview(str(row.get("body", ""))),
+            "received_at": row.get("received_at", ""),
+        }
+        for row in rows
+        if normalize_preview(str(row.get("body", "")))
+    ]
+
+
+def refresh_style_profile(
+    *,
+    screens: int,
+    limit: int,
+    feedback_path: Path,
+    samples_output: Path,
+    profile_output: Path,
+) -> dict[str, object]:
+    rows = fetch_folder_messages("Sent Items", screens=screens, limit=limit)
+    samples = sent_samples(rows)
+    feedback_rows = load_feedback_rows(feedback_path)
+    profile = infer_profile(samples, feedback_rows)
+
+    samples_output.parent.mkdir(parents=True, exist_ok=True)
+    samples_output.write_text(json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8")
+    profile_output.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {
+        "sample_count": len(samples),
+        "feedback_count": len(feedback_rows),
+        "samples_output": str(samples_output),
+        "profile_output": str(profile_output),
+        "profile": profile,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Infer an Outlook reply style profile from Sent Items.")
     parser.add_argument("--screens", type=int, default=12)
@@ -202,39 +241,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    rows = fetch_folder_messages("Sent Items", screens=args.screens, limit=args.limit)
-    samples = [
-        {
-            "from": row.get("from", ""),
-            "subject": row.get("subject", ""),
-            "body": normalize_preview(str(row.get("body", ""))),
-            "received_at": row.get("received_at", ""),
-        }
-        for row in rows
-        if normalize_preview(str(row.get("body", "")))
-    ]
-    feedback_rows = load_feedback_rows(Path(args.feedback))
-    profile = infer_profile(samples, feedback_rows)
-
-    samples_path = Path(args.samples_output)
-    profile_path = Path(args.profile_output)
-    samples_path.parent.mkdir(parents=True, exist_ok=True)
-    samples_path.write_text(json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8")
-    profile_path.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    print(
-        json.dumps(
-            {
-                "sample_count": len(samples),
-                "feedback_count": len(feedback_rows),
-                "samples_output": str(samples_path),
-                "profile_output": str(profile_path),
-                "profile": profile,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+    payload = refresh_style_profile(
+        screens=args.screens,
+        limit=args.limit,
+        feedback_path=Path(args.feedback),
+        samples_output=Path(args.samples_output),
+        profile_output=Path(args.profile_output),
     )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 
