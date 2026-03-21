@@ -234,7 +234,7 @@ JSON.stringify(
         return result
     if result.get("already_selected"):
         return {**result, "selected_folder": folder_name}
-    for _ in range(10):
+    for _ in range(24):
         time.sleep(0.25)
         if folder_selected_name() == folder_name:
             return {**result, "selected_folder": folder_name}

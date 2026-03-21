@@ -135,8 +135,10 @@ JSON.stringify(
 def scroll_message_list() -> dict[str, Any]:
     expr = """
 (() => {
-  const box = document.querySelector('[role="listbox"]');
-  if (!box) return JSON.stringify({ ok: false, reason: 'no-listbox' });
+  const box =
+    document.querySelector('[data-testid="virtuoso-scroller"]') ||
+    document.querySelector('[role="listbox"]');
+  if (!box) return JSON.stringify({ ok: false, reason: 'no-scroll-container' });
   const before = box.scrollTop;
   box.scrollTop = Math.min(box.scrollTop + Math.max(box.clientHeight - 80, 200), box.scrollHeight);
   return JSON.stringify({
@@ -154,7 +156,9 @@ def scroll_message_list() -> dict[str, Any]:
 def reset_message_list_scroll() -> None:
     expr = """
 (() => {
-  const box = document.querySelector('[role="listbox"]');
+  const box =
+    document.querySelector('[data-testid="virtuoso-scroller"]') ||
+    document.querySelector('[role="listbox"]');
   if (box) box.scrollTop = 0;
   return true;
 })()

@@ -94,7 +94,7 @@ Build one local workflow that can:
   - helper script: `browser/outlook_draft_helper.py`
   - suggestion log: `shared/outlook_draft_suggestions.jsonl`
   - feedback log: `shared/outlook_draft_feedback.jsonl`
-  - supports selected-message extraction, folder-level draft suggestion, reply draft injection, and send-time feedback logging
+  - supports selected-message extraction, folder-level draft suggestion, reply draft injection, explicit feedback logging, and send-time feedback logging
 - A lightweight style learner now exists for Outlook replies:
   - helper script: `browser/outlook_reply_style.py`
   - reads recent `Sent Items` previews

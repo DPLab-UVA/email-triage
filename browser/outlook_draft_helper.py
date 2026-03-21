@@ -302,6 +302,59 @@ def latest_suggestion(path: Path, *, subject: str, sender: str = "") -> dict[str
     return None
 
 
+def find_suggestion(
+    path: Path,
+    *,
+    conversation_id: str = "",
+    subject: str = "",
+    sender: str = "",
+) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    for line in reversed(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            row = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if conversation_id and row.get("conversation_id") == conversation_id:
+            return row
+        if subject and row.get("subject") != subject:
+            continue
+        if sender and row.get("from") != sender:
+            continue
+        if subject:
+            return row
+    return None
+
+
+def save_feedback(
+    feedback_path: Path,
+    *,
+    suggestion: dict[str, Any],
+    status: str,
+    note: str = "",
+    source: str,
+    final_body: str = "",
+) -> dict[str, Any]:
+    payload = {
+        "timestamp": now_iso(),
+        "source": source,
+        "status": status,
+        "note": note,
+        "conversation_id": suggestion.get("conversation_id", ""),
+        "from": suggestion.get("from", ""),
+        "subject": suggestion.get("subject", ""),
+        "draft_reply": suggestion.get("draft_reply", ""),
+        "final_compose_body": final_body,
+    }
+    append_jsonl(feedback_path, payload)
+    return payload
+
+
 def load_style_profile(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
@@ -735,6 +788,41 @@ def command_discard_current(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_feedback(args: argparse.Namespace) -> int:
+    conversation_id = str(args.conversation_id or "").strip()
+    subject = str(args.subject or "").strip()
+    sender = str(args.sender or "").strip()
+
+    if args.selected:
+        message = selected_message_payload()
+        conversation_id = conversation_id or str(message.get("conversation_id", "")).strip()
+        subject = subject or str(message.get("subject", "")).strip()
+        sender = sender or str(message.get("from", "")).strip()
+
+    if not conversation_id and not subject:
+        raise BridgeError("feedback needs --selected or at least --subject/--conversation-id")
+
+    suggestion = find_suggestion(
+        Path(args.suggestions),
+        conversation_id=conversation_id,
+        subject=subject,
+        sender=sender,
+    )
+    if not suggestion:
+        raise BridgeError("No matching suggestion found for feedback")
+
+    payload = save_feedback(
+        Path(args.feedback),
+        suggestion=suggestion,
+        status=args.status,
+        note=str(args.note or ""),
+        source="manual-feedback",
+        final_body=str(args.final_body or ""),
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def command_suggest_folder(args: argparse.Namespace) -> int:
     ensure_session_ready()
     rules, examples = load_rules_examples(Path(args.rules), Path(args.examples))
@@ -853,6 +941,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     discard = subparsers.add_parser("discard-current", help="Discard the currently open Outlook compose draft.")
     discard.set_defaults(func=command_discard_current)
+
+    feedback = subparsers.add_parser("feedback", help="Log explicit feedback for a draft suggestion.")
+    feedback.add_argument("--status", required=True, choices=["approved", "edited", "rejected"])
+    feedback.add_argument("--selected", action="store_true")
+    feedback.add_argument("--conversation-id")
+    feedback.add_argument("--subject")
+    feedback.add_argument("--sender")
+    feedback.add_argument("--note")
+    feedback.add_argument("--final-body")
+    feedback.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
+    feedback.add_argument("--feedback", default=str(DEFAULT_FEEDBACK))
+    feedback.set_defaults(func=command_feedback)
     return parser
 
 
