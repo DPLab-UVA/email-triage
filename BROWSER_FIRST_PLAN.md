@@ -30,8 +30,8 @@ Build one local workflow that can:
 
 ## Immediate Next Steps
 
-1. Verify whether `gstack-browse` can open Gmail Web and Outlook Web with the user's existing browser session.
-2. If not logged in, test cookie import or another low-friction session bootstrap path.
+1. Keep `gstack-browse` as the primary Outlook Web control path.
+2. Reuse the project-local bridge and Outlook workflow wrapper instead of raw ad hoc CLI calls.
 3. Build a browser-side extractor for:
    - subject
    - sender
@@ -49,18 +49,31 @@ Build one local workflow that can:
 
 - `gstack-browse` is installed and runnable from:
   `~/.codex/skills/gstack/browse/dist/browse`
-- Gmail Web opens reliably, but the gstack browser session does not inherit Google login state by default.
-- Direct cookie import from Chrome to `mail.google.com` imports at least one cookie, but not enough to bypass the Google sign-in page.
-- Outlook Web is more promising:
-  - direct Chrome cookie import is available
-  - after import, navigation can remain on `https://outlook.office.com/mail/`
-- Current blocker on Outlook Web is tool stability:
-  - once on the page, `text` or `snapshot -i` can cause `gstack-browse` to lose its server connection and restart
-- This means the browser-first direction is still correct, but the next task is to stabilize `gstack-browse` on Outlook Web before building extraction and drafting on top of it.
+- Gmail Web still does not inherit login state by default, so Gmail is not the active path.
+- Outlook Web is now the active path.
+- The raw `gstack-browse` CLI server lifecycle is still flaky in this environment:
+  - it can restart instead of reconnecting
+  - state files can be replaced unexpectedly
+- A project-local tmux-hosted bridge fixes the practical stability problem:
+  - file: `browser/gstack_browse_bridge.py`
+  - state file: `.gstack/bridge-browse.json`
+- Chrome profile selection mattered:
+  - the machine's recent Chrome profile is `Profile 1`, not `Default`
+  - `cookie-import-browser` needed `--profile` support to import the right Outlook cookies
+- After importing cookies from Chrome `Profile 1`, Outlook Web now stays logged in and readable:
+  - current URL can remain on real message pages under `https://outlook.office.com/mail/...`
+  - `text` and `snapshot -i` both work through the bridge
+- A higher-level Outlook wrapper now exists:
+  - file: `browser/outlook_web_workflow.py`
+  - commands:
+    - `bootstrap`
+    - `status`
+    - `current-view`
+    - `capture-current`
 
 ## Short-Term Success Criteria
 
-- Open Gmail Web or Outlook Web through `gstack-browse`
+- Open Outlook Web through `gstack-browse`
 - Read one real message reliably
 - Insert one reply draft reliably
 - Detect one sent outcome reliably
