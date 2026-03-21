@@ -24,6 +24,20 @@
       "sender_contains": "Microsoft CMT",
       "subject_contains": "URGENT: Please pre-register",
       "reason": "Conference registration deadlines should notify."
+    },
+    {
+      "subject_contains": "ATTN REQUIRED",
+      "reason": "Explicit required-action subjects should notify."
+    },
+    {
+      "sender_contains": "HotCRP",
+      "subject_contains": "Comment for #",
+      "reason": "HotCRP comment notifications are usually actionable."
+    },
+    {
+      "sender_contains": "HotCRP",
+      "subject_contains": "Response for #",
+      "reason": "HotCRP response notifications are usually actionable."
     }
   ],
   "force_not_important": [
@@ -82,7 +96,9 @@
     "asap",
     "new login",
     "pre-register",
-    "register by"
+    "register by",
+    "action item",
+    "attn required"
   ],
   "ignore_senders": [
     "no-reply@example.com"

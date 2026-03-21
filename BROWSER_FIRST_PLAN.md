@@ -72,6 +72,10 @@ Build one local workflow that can:
     - `status`
     - `current-view`
     - `capture-current`
+- A real Outlook move-to-folder action now works end to end:
+  - target folder: `Night Review`
+  - verified by moving one low-risk journal-invitation email out of Inbox
+  - action-layer script: `browser/outlook_apply_triage.py`
 - Atlas is now confirmed as a live visible Outlook session holder:
   - the Atlas app already has logged-in Outlook tabs
   - helper file: `browser/atlas_outlook_helper.py`
