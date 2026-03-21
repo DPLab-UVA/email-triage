@@ -21,6 +21,8 @@ Build one local workflow that can:
 
 - Primary execution path:
   `gstack-browse`
+- Visible session helper:
+  `browser/atlas_outlook_helper.py`
 - Secondary capture path:
   `chrome-extension/`
 - Fallback API path:
@@ -70,6 +72,18 @@ Build one local workflow that can:
     - `status`
     - `current-view`
     - `capture-current`
+- Atlas is now confirmed as a live visible Outlook session holder:
+  - the Atlas app already has logged-in Outlook tabs
+  - helper file: `browser/atlas_outlook_helper.py`
+  - current supported actions:
+    - `tabs`
+    - `focus-outlook`
+    - `reload-outlook`
+    - `open-outlook`
+- Atlas is useful immediately for visible tab/session operations, but not yet as a reusable cookie source for `gstack-browse`:
+  - Outlook cookies are present in the active Atlas profile
+  - they are encrypted
+  - the Atlas Safe Storage keychain service name has not been identified yet
 
 ## Short-Term Success Criteria
 
