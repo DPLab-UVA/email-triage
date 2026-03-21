@@ -20,5 +20,6 @@ shared/fast_rule_summary.json
 shared/outlook_monitor_*.json
 shared/outlook_night_review_*.json
 shared/outlook_recent_*.json
+shared/outlook_reply_style_*.json
 shared/outlook-browser-captures/
 .gstack/

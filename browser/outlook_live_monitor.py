@@ -18,7 +18,13 @@ from outlook_apply_triage import (
     folder_exists,
     move_message_to_folder,
 )
-from outlook_draft_helper import DEFAULT_SUGGESTIONS, save_suggestion
+from outlook_draft_helper import (
+    DEFAULT_STYLE_PROFILE,
+    DEFAULT_SUGGESTIONS,
+    draft_reply_for_message,
+    load_style_profile,
+    save_suggestion,
+)
 from outlook_night_review import (
     DEFAULT_EVENT_LOG as DEFAULT_NIGHT_REVIEW_EVENT_LOG,
     DEFAULT_STATE as DEFAULT_NIGHT_REVIEW_STATE,
@@ -169,6 +175,7 @@ def run_cycle(
     rows = fetch_recent_messages(screens=screens, limit=limit, recent_only=not include_pinned)
     triaged, summary = triage_recent_messages(rows, rules_path=rules_path, examples_path=examples_path)
     rules = load_json(rules_path)
+    style_profile = load_style_profile(DEFAULT_STYLE_PROFILE)
     state = load_state(state_path)
     seen = set(state.get("seen_keys", []))
     folder_name = str(summary.get("nightly_digest_folder", "Night Review"))
@@ -224,15 +231,28 @@ def run_cycle(
             clear_attempt(state, key)
         elif row.get("bucket") == "important_notify":
             event["action"] = "notify"
-            event["draft_suggestion"] = save_suggestion(
-                suggestions_path,
+            draft_reply = draft_reply_for_message(
                 {
                     **row,
                     "body_full": row.get("body", ""),
                 },
                 row.get("triage", {}),
-                source="live-monitor",
+                rules,
+                style_profile,
             )
+            if draft_reply:
+                event["draft_suggestion"] = save_suggestion(
+                    suggestions_path,
+                    {
+                        **row,
+                        "body_full": row.get("body", ""),
+                    },
+                    {
+                        **row.get("triage", {}),
+                        "draft_reply": draft_reply,
+                    },
+                    source="live-monitor",
+                )
             if notify:
                 notified = notify_user(row, str(row.get("reason", "")))
                 event["status"] = "notified" if notified else "notify-failed"

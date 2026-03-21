@@ -232,6 +232,8 @@ JSON.stringify(
     result = bridge_json(expr, timeout=15.0) or {}
     if not result.get("ok"):
         return result
+    if result.get("already_selected"):
+        return {**result, "selected_folder": folder_name}
     for _ in range(10):
         time.sleep(0.25)
         if folder_selected_name() == folder_name:

@@ -12,6 +12,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from outlook_apply_triage import select_visible_message
+from outlook_night_review import fetch_folder_messages
 from gstack_browse_bridge import BridgeError, send_command
 from outlook_recent_triage import (
     SHARED,
@@ -29,10 +31,11 @@ from outlook_web_workflow import (
 
 sys.path.append(str(SHARED))
 
-from triage_engine import build_draft, load_json, load_jsonl, triage_message  # noqa: E402
+from triage_engine import load_json, load_jsonl, triage_message  # noqa: E402
 
 DEFAULT_SUGGESTIONS = SHARED / "outlook_draft_suggestions.jsonl"
 DEFAULT_FEEDBACK = SHARED / "outlook_draft_feedback.jsonl"
+DEFAULT_STYLE_PROFILE = SHARED / "outlook_reply_style_profile.json"
 
 
 def bridge_cmd(command: str, *args: str, timeout: float = 30.0) -> str:
@@ -70,6 +73,69 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
 
 def useful_lines(text: str) -> list[str]:
     return [clean_line(line) for line in (text or "").splitlines() if clean_line(line)]
+
+
+def is_thread_date_line(line: str) -> bool:
+    return bool(
+        TIME_LINE_RE.match(line)
+        or re.match(r"^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}\s?[AP]M$", line)
+    )
+
+
+def looks_like_self_line(line: str) -> bool:
+    lower = (line or "").strip().lower()
+    return lower == "you" or "tianhao" in lower or "nkp2mr" in lower
+
+
+def extract_thread_blocks(lines: list[str]) -> list[dict[str, str]]:
+    date_indexes = [idx for idx, line in enumerate(lines) if is_thread_date_line(line)]
+    blocks: list[dict[str, str]] = []
+    if not date_indexes:
+        return blocks
+
+    for pos, idx in enumerate(date_indexes):
+        sender = ""
+        for back in range(idx - 1, -1, -1):
+            candidate = lines[back].strip()
+            previous = lines[back - 1].strip() if back > 0 else ""
+            if not candidate or candidate in {"Summarize", "Reply", "Reply all", "Forward"}:
+                continue
+            if re.match(r"^[A-Z]{1,3}$", candidate):
+                continue
+            if candidate.startswith(("To:", "Cc:", "Bcc:")):
+                continue
+            if previous.startswith(("To:", "Cc:", "Bcc:")):
+                continue
+            if looks_like_self_line(candidate):
+                sender = "You"
+                break
+            sender = candidate
+            break
+
+        end = date_indexes[pos + 1] if pos + 1 < len(date_indexes) else len(lines)
+        body_lines: list[str] = []
+        for line in lines[idx + 1 : end]:
+            if line in {"Reply", "Reply all", "Forward"}:
+                break
+            body_lines.append(line)
+        body = "\n".join(body_lines).strip()
+        if sender or body:
+            blocks.append(
+                {
+                    "sender": sender,
+                    "timestamp": lines[idx],
+                    "body": body,
+                }
+            )
+    return blocks
+
+
+def latest_external_block(lines: list[str]) -> dict[str, str]:
+    for block in reversed(extract_thread_blocks(lines)):
+        sender = block.get("sender", "")
+        if sender and sender != "You":
+            return block
+    return {}
 
 
 def selected_row() -> dict[str, Any]:
@@ -158,11 +224,15 @@ def parse_reading_pane(message: dict[str, Any], pane_text: str) -> dict[str, Any
         trimmed.append(line)
 
     body_full = "\n".join(trimmed).strip()
+    latest_incoming = latest_external_block(lines)
     return {
         **message,
         "from": sender,
         "body_full": body_full,
         "pane_lines": lines,
+        "latest_incoming_sender": latest_incoming.get("sender", ""),
+        "latest_incoming_body": latest_incoming.get("body", ""),
+        "latest_incoming_timestamp": latest_incoming.get("timestamp", ""),
     }
 
 
@@ -232,20 +302,215 @@ def latest_suggestion(path: Path, *, subject: str, sender: str = "") -> dict[str
     return None
 
 
-def classify_selected_message(rules_path: Path, examples_path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
-    message = selected_message_payload()
-    rules, examples = load_rules_examples(rules_path, examples_path)
+def load_style_profile(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def message_body_for_model(message: dict[str, Any]) -> str:
+    return str(
+        message.get("latest_incoming_body")
+        or message.get("body_full")
+        or message.get("body")
+        or ""
+    ).strip()
+
+
+def looks_automated_sender(sender: str) -> bool:
+    value = (sender or "").lower()
+    automated_hints = [
+        "noreply",
+        "no-reply",
+        "do-not-reply",
+        "donotreply",
+        "notification",
+        "notifications",
+        "hotcrp",
+        "microsoft cmt",
+        "huggingface",
+        "bookstores",
+        "editorial",
+        "helpdesk",
+        "scholarcitations",
+        "security",
+        "center for faculty",
+        "office of ",
+    ]
+    return any(token in value for token in automated_hints)
+
+
+def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
+    category = str(triage.get("category", "")).strip().lower()
+    subject = str(message.get("subject", "")).strip().lower()
+    sender = str(message.get("from", "")).strip()
+    body = message_body_for_model(message).lower()
+    if any(
+        token in body
+        for token in [
+            "dear colleague",
+            "we are pleased to invite you",
+            "registration page",
+            "first-come, first-served",
+            "we look forward to your registration",
+        ]
+    ):
+        return False
+    if not message.get("latest_incoming_body") and len(extract_thread_blocks(message.get("pane_lines", []))) > 1:
+        return False
+    actionable = any(
+        token in body or token in subject
+        for token in [
+            "?",
+            "can you",
+            "could you",
+            "please",
+            "let me know",
+            "send",
+            "share",
+            "confirm",
+            "when you",
+            "once",
+            "deadline",
+            "availability",
+            "action required",
+            "attn required",
+        ]
+    )
+    if message.get("pinned") and not looks_automated_sender(sender):
+        return actionable
+    if not triage.get("important"):
+        return False
+    if category in {"security", "review", "review_invitation", "ticket"}:
+        return False
+    if looks_automated_sender(sender):
+        return False
+    if any(
+        token in subject or token in body
+        for token in [
+            "new login to your",
+            "submitted review #",
+            "comment for #",
+            "response for #",
+            "pre-register",
+            "verification code",
+        ]
+    ):
+        return False
+    return True
+
+
+def style_signoff(style_profile: dict[str, Any], rules: dict[str, Any]) -> str:
+    signoff = str(style_profile.get("recommended_signoff") or "").strip()
+    if signoff:
+        return signoff
+    return str(rules.get("draft_preferences", {}).get("signature", "")).strip()
+
+
+def default_opening(message: dict[str, Any], triage: dict[str, Any]) -> str:
+    subject = str(message.get("subject", "")).lower()
+    body = message_body_for_model(message).lower()
+    category = str(triage.get("category", "")).lower()
+
+    if "availability" in subject or "availability" in body:
+        return "I can do that."
+    if "budget" in subject or "budget" in body:
+        return "Noted."
+    if "flight" in body and "detail" in body:
+        return "Thanks."
+    if "reimburse" in subject or "reimburse" in body or "reimbursement" in subject:
+        return "Yes, that works."
+    if category == "deadline" or "action required" in subject or "attn required" in subject:
+        return "Noted."
+    if category == "scheduling":
+        return "I can do that."
+    if category == "request":
+        return "Yes, that works on my end."
+    if "thank you" in body or "thanks" in body:
+        return "Thanks."
+    return "Noted."
+
+
+def default_follow_up(message: dict[str, Any], triage: dict[str, Any]) -> str:
+    subject = str(message.get("subject", "")).lower()
+    body = message_body_for_model(message).lower()
+    category = str(triage.get("category", "")).lower()
+
+    if "availability" in subject or "availability" in body:
+        return "If needed, I can adjust a bit on my side."
+    if "flight" in body and "detail" in body:
+        return "I'll send the flight details once the plan is fixed."
+    if "hotel" in body and "flight" in body:
+        return "No preference on my end for the hotel or flight."
+    if category == "deadline" or "action required" in subject or "attn required" in subject:
+        return "I'll take care of it soon."
+    if category == "request":
+        return "Let me know if you need anything else from me."
+    if "can you" in body or "could you" in body or "please" in body:
+        return "I'll follow up on it shortly."
+    return ""
+
+
+def draft_reply_for_message(
+    message: dict[str, Any],
+    triage: dict[str, Any],
+    rules: dict[str, Any],
+    style_profile: dict[str, Any] | None = None,
+) -> str:
+    if not reply_eligible(message, triage):
+        return ""
+    style_profile = style_profile or {}
+    opening = default_opening(message, triage)
+    follow_up = default_follow_up(message, triage)
+    signoff = style_signoff(style_profile, rules)
+
+    lines: list[str] = []
+    use_greeting = bool(style_profile.get("use_greeting_default", False))
+    if use_greeting:
+        sender = str(message.get("from", "")).split(";", 1)[0].strip()
+        if sender:
+            lines.extend([f"Hi {sender},", ""])
+
+    lines.append(opening)
+    if follow_up:
+        lines.append(follow_up)
+    if signoff:
+        lines.extend(["", signoff])
+    return "\n".join(line for line in lines if line is not None).strip()
+
+
+def classify_message_payload(
+    message: dict[str, Any],
+    rules: dict[str, Any],
+    examples: list[dict[str, Any]],
+    *,
+    style_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     triage = triage_message(
         {
             **message,
-            "body": message.get("body_full") or message.get("body", ""),
+            "body": message_body_for_model(message),
         },
         rules,
         examples,
     )
-    if triage.get("important") and not triage.get("draft_reply"):
-        triage["draft_reply"] = build_draft(message, rules, triage.get("category", "generic"))
-    return message, triage
+    triage["draft_reply"] = draft_reply_for_message(message, triage, rules, style_profile)
+    return triage
+
+
+def classify_selected_message(
+    rules_path: Path,
+    examples_path: Path,
+    style_path: Path,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    message = selected_message_payload()
+    rules, examples = load_rules_examples(rules_path, examples_path)
+    style_profile = load_style_profile(style_path)
+    triage = classify_message_payload(message, rules, examples, style_profile=style_profile)
+    return message, triage, rules, examples
 
 
 def ensure_reply_open() -> dict[str, Any]:
@@ -406,7 +671,11 @@ def command_selected(args: argparse.Namespace) -> int:
 
 
 def command_suggest_selected(args: argparse.Namespace) -> int:
-    message, triage = classify_selected_message(Path(args.rules), Path(args.examples))
+    message, triage, _, _ = classify_selected_message(
+        Path(args.rules),
+        Path(args.examples),
+        Path(args.style_profile),
+    )
     payload = {
         "message": message,
         "triage": triage,
@@ -418,7 +687,11 @@ def command_suggest_selected(args: argparse.Namespace) -> int:
 
 
 def command_reply_selected(args: argparse.Namespace) -> int:
-    message, triage = classify_selected_message(Path(args.rules), Path(args.examples))
+    message, triage, _, _ = classify_selected_message(
+        Path(args.rules),
+        Path(args.examples),
+        Path(args.style_profile),
+    )
     draft_reply = str(triage.get("draft_reply", "")).strip()
     if not draft_reply and not args.force:
         raise BridgeError("Selected message is not currently classified for drafting; use --force if you want to inject anyway")
@@ -462,6 +735,78 @@ def command_discard_current(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_suggest_folder(args: argparse.Namespace) -> int:
+    ensure_session_ready()
+    rules, examples = load_rules_examples(Path(args.rules), Path(args.examples))
+    style_profile = load_style_profile(Path(args.style_profile))
+    rows = fetch_folder_messages(args.folder, screens=args.screens, limit=args.limit)
+
+    suggestions: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    for row in rows:
+        if row.get("pinned") and not args.include_pinned:
+            continue
+
+        preview_triage = classify_message_payload(row, rules, examples, style_profile=style_profile)
+        inspect_full = bool(str(preview_triage.get("draft_reply", "")).strip())
+        if row.get("pinned") and args.include_pinned and not looks_automated_sender(str(row.get("from", ""))):
+            inspect_full = True
+        if not inspect_full:
+            skipped.append(
+                {
+                    "from": row.get("from", ""),
+                    "subject": row.get("subject", ""),
+                    "reason": "; ".join(preview_triage.get("reasons", [])) or preview_triage.get("category", ""),
+                }
+            )
+            continue
+
+        selected = select_visible_message(str(row.get("dom_id", "")), str(row.get("subject", "")))
+        if not selected.get("ok"):
+            skipped.append(
+                {
+                    "from": row.get("from", ""),
+                    "subject": row.get("subject", ""),
+                    "reason": f"select failed: {selected}",
+                }
+            )
+            continue
+
+        message = selected_message_payload()
+        triage = classify_message_payload(message, rules, examples, style_profile=style_profile)
+        draft_reply = str(triage.get("draft_reply", "")).strip()
+        if not draft_reply:
+            skipped.append(
+                {
+                    "from": message.get("from", ""),
+                    "subject": message.get("subject", ""),
+                    "reason": "not reply-eligible after full-body parse",
+                }
+            )
+            continue
+
+        record = save_suggestion(Path(args.suggestions), message, triage, source=f"folder:{args.folder}")
+        suggestions.append(
+            {
+                "message": message,
+                "triage": triage,
+                "suggestion": record,
+            }
+        )
+        if len(suggestions) >= args.max_drafts:
+            break
+
+    payload = {
+        "folder": args.folder,
+        "scanned": len(rows),
+        "drafts_created": len(suggestions),
+        "drafts": suggestions,
+        "skipped_examples": skipped[:8],
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Draft helpers for Outlook Web.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -473,13 +818,27 @@ def build_parser() -> argparse.ArgumentParser:
     suggest.add_argument("--rules", default=str(SHARED / "default_rules.json"))
     suggest.add_argument("--examples", default=str(SHARED / "example_labeled_emails.jsonl"))
     suggest.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
+    suggest.add_argument("--style-profile", default=str(DEFAULT_STYLE_PROFILE))
     suggest.add_argument("--log", action="store_true")
     suggest.set_defaults(func=command_suggest_selected)
+
+    suggest_folder = subparsers.add_parser("suggest-folder", help="Generate draft suggestions for reply-worthy messages in one Outlook folder.")
+    suggest_folder.add_argument("--folder", default="Inbox")
+    suggest_folder.add_argument("--screens", type=int, default=8)
+    suggest_folder.add_argument("--limit", type=int, default=25)
+    suggest_folder.add_argument("--max-drafts", type=int, default=3)
+    suggest_folder.add_argument("--include-pinned", action="store_true")
+    suggest_folder.add_argument("--rules", default=str(SHARED / "default_rules.json"))
+    suggest_folder.add_argument("--examples", default=str(SHARED / "example_labeled_emails.jsonl"))
+    suggest_folder.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
+    suggest_folder.add_argument("--style-profile", default=str(DEFAULT_STYLE_PROFILE))
+    suggest_folder.set_defaults(func=command_suggest_folder)
 
     reply = subparsers.add_parser("reply-selected", help="Open Outlook reply compose and optionally inject the draft.")
     reply.add_argument("--rules", default=str(SHARED / "default_rules.json"))
     reply.add_argument("--examples", default=str(SHARED / "example_labeled_emails.jsonl"))
     reply.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
+    reply.add_argument("--style-profile", default=str(DEFAULT_STYLE_PROFILE))
     reply.add_argument("--insert", action="store_true")
     reply.add_argument("--force", action="store_true")
     reply.set_defaults(func=command_reply_selected)

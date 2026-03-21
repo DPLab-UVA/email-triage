@@ -74,6 +74,26 @@ def import_profile_cookies(browser: str, profile: str, domains: list[str]) -> li
 
 def ensure_outlook_session(browser: str, profile: str, domains: list[str]) -> dict[str, Any]:
     server = ensure_tmux_server()
+    current_url = ""
+    try:
+        current_url = bridge_cmd("url")
+    except Exception:
+        current_url = ""
+    if "outlook.office.com" in current_url and "login.microsoftonline.com" not in current_url:
+        tabs = bridge_cmd("tabs")
+        page_text = bridge_cmd("text", timeout=45.0)
+        if is_logged_in(current_url, page_text):
+            return {
+                "server": server,
+                "browser": browser,
+                "profile": profile,
+                "cookie_domains": domains,
+                "import_results": [],
+                "url": current_url,
+                "tabs": tabs,
+                "logged_in": True,
+                "page_excerpt": page_text[:2000],
+            }
     imports = import_profile_cookies(browser, profile, domains)
     bridge_cmd("goto", DEFAULT_OUTLOOK_URL, timeout=45.0)
     bridge_cmd("wait", "--load", timeout=45.0)

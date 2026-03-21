@@ -94,7 +94,11 @@ Build one local workflow that can:
   - helper script: `browser/outlook_draft_helper.py`
   - suggestion log: `shared/outlook_draft_suggestions.jsonl`
   - feedback log: `shared/outlook_draft_feedback.jsonl`
-  - supports selected-message extraction, reply draft injection, and send-time feedback logging
+  - supports selected-message extraction, folder-level draft suggestion, reply draft injection, and send-time feedback logging
+- A lightweight style learner now exists for Outlook replies:
+  - helper script: `browser/outlook_reply_style.py`
+  - reads recent `Sent Items` previews
+  - writes a local reply-style profile used to make drafts shorter and less AI-like
 - Atlas is now confirmed as a live visible Outlook session holder:
   - the Atlas app already has logged-in Outlook tabs
   - helper file: `browser/atlas_outlook_helper.py`
