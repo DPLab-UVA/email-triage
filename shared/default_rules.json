@@ -1,0 +1,101 @@
+{
+  "priority_threshold": 4,
+  "nightly_digest_hour_local": 21,
+  "force_important": [
+    {
+      "sender_contains": "noreply-travel@google.com",
+      "reason": "Tracked Google Flights alerts should notify."
+    },
+    {
+      "sender_contains": "scholarcitations-noreply@google.com",
+      "reason": "Google Scholar reminders are important."
+    },
+    {
+      "sender_contains": "seas@virginia.edu",
+      "subject_contains": "UVA Engineering Newsletter",
+      "reason": "User wants the UVA Engineering newsletter to notify."
+    }
+  ],
+  "force_not_important": [
+    {
+      "sender_contains": "hotcrp@cs.uchicago.edu",
+      "subject_contains": "Submitted review #",
+      "reason": "Submitted review receipts are low priority."
+    },
+    {
+      "subject_contains": "Agentic AI Summit 2026",
+      "reason": "External summit promo should not notify."
+    },
+    {
+      "subject_contains": "Congratulations on",
+      "reason": "Congratulation threads are usually low priority."
+    },
+    {
+      "subject_contains": "UVA Engineering Research Symposium",
+      "reason": "General symposium announcements should go to the nightly digest."
+    },
+    {
+      "subject_contains": "Funding Opportunity",
+      "reason": "Funding-opportunity broadcasts should usually go to the nightly digest."
+    },
+    {
+      "subject_contains": "seminar",
+      "reason": "Seminar and talk announcements should usually go to the nightly digest."
+    },
+    {
+      "subject_contains": "talk",
+      "reason": "Talk announcements should usually go to the nightly digest."
+    }
+  ],
+  "important_senders": [
+    "advisor@example.edu",
+    "boss@example.com"
+  ],
+  "important_domains": [],
+  "important_keywords": [
+    "deadline",
+    "urgent",
+    "meeting",
+    "interview",
+    "review",
+    "action required",
+    "action advised",
+    "helpdesk",
+    "ticket",
+    "cshd-",
+    "security alert",
+    "verification code",
+    "ci failed",
+    "follow-up",
+    "repair",
+    "due",
+    "asap"
+  ],
+  "ignore_senders": [
+    "no-reply@example.com"
+  ],
+  "ignore_domains": [
+    "mailchi.mp"
+  ],
+  "ignore_keywords": [
+    "unsubscribe",
+    "newsletter",
+    "promotion",
+    "sale",
+    "digest",
+    "view this email in your browser",
+    "early-bird pricing",
+    "call for speakers",
+    "limited-time",
+    "your best days start with better nights"
+  ],
+  "draft_preferences": {
+    "name": "Tianhao",
+    "signature": "Best,\nTianhao",
+    "tone": "concise, polite, and professional",
+    "ask_for_clarification_template": "Thanks for the message. I want to make sure I respond accurately. Could you clarify [insert missing detail]?",
+    "scheduling_template": "Thanks for reaching out. I am available [insert availability]. Please let me know what time works best for you.",
+    "deadline_template": "Thanks for the reminder. I saw the deadline and will take care of it by [insert time].",
+    "generic_template": "Thanks for the message. I reviewed it and will follow up shortly."
+  }
+}

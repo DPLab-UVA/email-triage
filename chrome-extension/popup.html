@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Outlook Triage</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">Best-effort DOM prototype</p>
+        <h1>Outlook Triage</h1>
+        <p class="lede">Capture visible message metadata, score importance, and draft reply guidance.</p>
+      </header>
+
+      <section class="card">
+        <div class="row">
+          <button id="capture">Capture current tab</button>
+          <button id="toggle">Toggle panel</button>
+        </div>
+        <div class="row">
+          <button id="export">Export JSON</button>
+        </div>
+        <div class="meta">
+          <div><span>State</span><strong id="state">Idle</strong></div>
+          <div><span>Page</span><strong id="page">No capture yet</strong></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Current Snapshot</h2>
+        <pre id="output">Open Outlook Web and capture a visible thread or inbox list.</pre>
+      </section>
+
+      <section class="card">
+        <h2>Rules JSON</h2>
+        <p class="hint">Paste your initial labels or rules here. This stores locally in the extension.</p>
+        <input id="label" type="text" placeholder="Inbox Triage" />
+        <textarea id="rules" rows="10" spellcheck="false"></textarea>
+        <div class="row">
+          <button id="saveRules" type="button">Save rules</button>
+          <button id="resetRules" type="button">Reset defaults</button>
+        </div>
+      </section>
+    </main>
+    <script src="triage-core.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

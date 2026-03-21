@@ -1,0 +1,19 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+# Local browser artifacts
+output/
+
+# Runtime state and virtualenvs
+**/.venv/
+**/state/
+
+# Private mail captures and generated review queues
+outlook-capture-*.json
+mail-app/*.json
+mail-app/*.jsonl
+shared/*.jsonl
+shared/*.log
+shared/*_top20.json
+shared/fast_rule_summary.json

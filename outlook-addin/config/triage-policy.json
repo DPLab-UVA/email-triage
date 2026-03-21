@@ -1,0 +1,46 @@
+{
+  "version": "0.1.0",
+  "importanceThreshold": 60,
+  "ignoreThreshold": 30,
+  "vipSenders": [],
+  "positiveKeywords": [
+    { "term": "urgent", "weight": 24 },
+    { "term": "deadline", "weight": 20 },
+    { "term": "action required", "weight": 30 },
+    { "term": "please review", "weight": 16 },
+    { "term": "meeting", "weight": 10 },
+    { "term": "response", "weight": 10 }
+  ],
+  "negativeKeywords": [
+    { "term": "newsletter", "weight": -40 },
+    { "term": "unsubscribe", "weight": -35 },
+    { "term": "promotion", "weight": -25 },
+    { "term": "receipt", "weight": -18 },
+    { "term": "delivery notice", "weight": -18 }
+  ],
+  "draftTemplates": {
+    "important": "Thanks for the note. I read this as a priority item. My suggested reply: {summary}\n\nIf helpful, I can tighten this into a shorter version or a more formal tone.",
+    "needs_reply": "Thanks for reaching out. I saw your message and will follow up on {next_step}.",
+    "ignore": "No reply needed. This looks like routine noise."
+  },
+  "examples": [
+    {
+      "label": "important",
+      "subject": "Deadline moved to Friday",
+      "body": "Please review the revised draft before Friday noon.",
+      "reply": "I reviewed the revision and will send comments today."
+    },
+    {
+      "label": "ignore",
+      "subject": "Weekly newsletter",
+      "body": "You are receiving this because you subscribed.",
+      "reply": ""
+    },
+    {
+      "label": "needs_reply",
+      "subject": "Can you confirm the room booking?",
+      "body": "Need a quick yes/no before I finalize the calendar invite.",
+      "reply": "Confirmed. The room booking works for me."
+    }
+  ]
+}

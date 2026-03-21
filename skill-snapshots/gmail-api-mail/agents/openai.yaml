@@ -1,0 +1,4 @@
+interface:
+  display_name: "Gmail API Mail"
+  short_description: "Control Gmail with the official Gmail API from a local CLI."
+  default_prompt: "Use $gmail-api-mail to authenticate to Gmail, inspect recent mail, read messages, and create Gmail drafts from this Mac."

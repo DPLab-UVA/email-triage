@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mail.app Mailbox"
+  short_description: "Control Mail.app mailboxes on macOS."
+  default_prompt: "Use $mail-app-mailbox to inspect or manage messages in macOS Mail, including Exchange/Outlook accounts synced locally."

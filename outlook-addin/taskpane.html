@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Email Triage Lab</title>
+    <link rel="stylesheet" href="./taskpane.css" />
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/Office.js"></script>
+    <script defer src="./taskpane.js"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Outlook add-in prototype</p>
+          <h1>Email Triage Lab</h1>
+          <p class="subcopy">
+            Score the current message, suppress noise, and draft a reply when it matters.
+          </p>
+        </div>
+        <div class="badge" id="hostBadge">Waiting for Office.js</div>
+      </header>
+
+      <section class="grid">
+        <article class="card">
+          <div class="card-head">
+            <h2>Current Item</h2>
+            <button class="ghost" id="refreshButton" type="button">Refresh</button>
+          </div>
+          <div class="kv" id="itemSummary">
+            <div class="muted">No item loaded yet.</div>
+          </div>
+        </article>
+
+        <article class="card accent">
+          <div class="card-head">
+            <h2>Triage</h2>
+            <button class="ghost" id="triageButton" type="button">Analyze</button>
+          </div>
+          <div id="triageResult" class="result muted">
+            Run analysis to see a decision.
+          </div>
+        </article>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Draft Assistance</h2>
+          <div class="row">
+            <button class="ghost" id="labelImportantButton" type="button">Label Important</button>
+            <button class="ghost" id="labelIgnoreButton" type="button">Label Ignore</button>
+          </div>
+        </div>
+        <div id="draftResult" class="draft muted">
+          No draft generated yet.
+        </div>
+        <div class="row">
+          <button class="primary" id="applyDraftButton" type="button">Insert Draft into Reply</button>
+          <button class="ghost" id="copyDraftButton" type="button">Copy Draft</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Rules and Samples</h2>
+          <button class="ghost" id="savePolicyButton" type="button">Save Policy</button>
+        </div>
+        <p class="muted">
+          Edit the JSON below. The prototype keeps it in localStorage and uses it as the local
+          "training" set for triage and draft generation.
+        </p>
+        <textarea id="policyEditor" spellcheck="false"></textarea>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Activity</h2>
+          <button class="ghost" id="resetPolicyButton" type="button">Reset</button>
+        </div>
+        <pre id="activityLog" class="log">Awaiting analysis...</pre>
+      </section>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,120 @@
+#triage-panel-root {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: min(420px, calc(100vw - 32px));
+  z-index: 2147483647;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#triage-panel-root.triage-hidden {
+  display: none;
+}
+
+#triage-panel-root .triage-shell {
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(31, 41, 55, 0.96));
+  color: #f9fafb;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  backdrop-filter: blur(12px);
+}
+
+#triage-panel-root .triage-header,
+#triage-panel-root .triage-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+#triage-panel-root .triage-header h1 {
+  margin: 2px 0 0;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+#triage-panel-root .triage-kicker {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #93c5fd;
+}
+
+#triage-panel-root .triage-body {
+  padding: 0 16px 16px;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+#triage-panel-root .triage-body button,
+#triage-panel-root .triage-header button,
+#triage-panel-root .triage-footer button {
+  background: #2563eb;
+  color: white;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+#triage-panel-root .triage-summary,
+#triage-panel-root .triage-section {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+#triage-panel-root .triage-section-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #93c5fd;
+  margin-bottom: 8px;
+}
+
+#triage-panel-root .triage-muted {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+#triage-panel-root ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+#triage-panel-root li {
+  padding: 10px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#triage-panel-root li:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+#triage-panel-root li span {
+  margin-left: 8px;
+  font-size: 11px;
+  color: #fde68a;
+  text-transform: uppercase;
+}
+
+#triage-panel-root .triage-important {
+  border-left: 3px solid #34d399;
+}
+
+#triage-panel-root .triage-suppress {
+  border-left: 3px solid #f59e0b;
+}
+
+#triage-panel-root .triage-review {
+  border-left: 3px solid #93c5fd;
+}
