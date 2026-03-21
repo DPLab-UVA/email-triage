@@ -361,6 +361,8 @@ def save_feedback(
         "conversation_id": suggestion.get("conversation_id", ""),
         "from": suggestion.get("from", ""),
         "subject": suggestion.get("subject", ""),
+        "category": suggestion.get("category", ""),
+        "important": bool(suggestion.get("important")),
         "draft_reply": suggestion.get("draft_reply", ""),
         "final_compose_body": final_body,
     }
@@ -531,10 +533,19 @@ def style_signoff(style_profile: dict[str, Any], rules: dict[str, Any]) -> str:
     return str(rules.get("draft_preferences", {}).get("signature", "")).strip()
 
 
+def category_style_value(style_profile: dict[str, Any], field: str, category: str) -> str:
+    category_map = style_profile.get(field, {}) or {}
+    value = category_map.get(category, "")
+    return str(value or "").strip()
+
+
 def default_opening(message: dict[str, Any], triage: dict[str, Any]) -> str:
     subject = str(message.get("subject", "")).lower()
     body = message_body_for_model(message).lower()
     category = str(triage.get("category", "")).lower()
+    preferred = category_style_value(style_profile=triage.get("style_profile", {}), field="category_openers", category=category)
+    if preferred:
+        return preferred
 
     if "availability" in subject or "availability" in body:
         return "I can do that."
@@ -559,6 +570,9 @@ def default_follow_up(message: dict[str, Any], triage: dict[str, Any]) -> str:
     subject = str(message.get("subject", "")).lower()
     body = message_body_for_model(message).lower()
     category = str(triage.get("category", "")).lower()
+    preferred = category_style_value(style_profile=triage.get("style_profile", {}), field="category_follow_ups", category=category)
+    if preferred:
+        return preferred
 
     if "availability" in subject or "availability" in body:
         return "If needed, I can adjust a bit on my side."
@@ -570,8 +584,10 @@ def default_follow_up(message: dict[str, Any], triage: dict[str, Any]) -> str:
         return "I'll take care of it soon."
     if category == "request":
         return "Let me know if you need anything else from me."
-    if "can you" in body or "could you" in body or "please" in body:
-        return "I'll follow up on it shortly."
+    if "send" in body or "share" in body:
+        return "I'll send it once it's fixed."
+    if "confirm" in body:
+        return "I'll confirm once the plan is fixed."
     return ""
 
 
@@ -584,6 +600,7 @@ def draft_reply_for_message(
     if not reply_eligible(message, triage):
         return ""
     style_profile = style_profile or {}
+    triage = {**triage, "style_profile": style_profile}
     opening = default_opening(message, triage)
     follow_up = default_follow_up(message, triage)
     signoff = style_signoff(style_profile, rules)
