@@ -1,0 +1,365 @@
+#!/usr/bin/env python3
+"""Continuously monitor Outlook Web and apply triage actions to new mail."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+from gstack_browse_bridge import BridgeError
+from outlook_apply_triage import (
+    DEFAULT_ACTION_LOG,
+    folder_exists,
+    move_message_to_folder,
+)
+from outlook_recent_triage import (
+    SHARED,
+    fetch_recent_messages,
+    triage_recent_messages,
+)
+from outlook_web_workflow import (
+    DEFAULT_BROWSER,
+    DEFAULT_COOKIE_DOMAINS,
+    DEFAULT_PROFILE,
+    ensure_outlook_session,
+)
+
+DEFAULT_STATE = SHARED / "outlook_monitor_state.json"
+DEFAULT_EVENT_LOG = SHARED / "outlook_monitor_events.jsonl"
+
+
+def now_iso() -> str:
+    return datetime.now().astimezone().isoformat()
+
+
+def load_state(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {
+            "created_at": now_iso(),
+            "updated_at": "",
+            "initialized": False,
+            "seen_keys": [],
+            "attempt_counts": {},
+            "last_run": {},
+        }
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {
+            "created_at": now_iso(),
+            "updated_at": "",
+            "initialized": False,
+            "seen_keys": [],
+            "attempt_counts": {},
+            "last_run": {"error": "state file was invalid json and was reset"},
+        }
+
+
+def save_state(path: Path, state: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def append_jsonl(path: Path, row: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def load_recent_events(path: Path, limit: int = 5) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    rows: list[dict[str, Any]] = []
+    for line in lines[-limit:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            rows.append(json.loads(stripped))
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+def message_key(row: dict[str, Any]) -> str:
+    conversation_id = str(row.get("conversation_id", "")).strip()
+    if conversation_id:
+        return f"convid:{conversation_id}"
+    dom_id = str(row.get("dom_id", "")).strip()
+    if dom_id:
+        return f"dom:{dom_id}"
+    return "fallback:{from_}|{subject}|{received_at}".format(
+        from_=str(row.get("from", "")).strip(),
+        subject=str(row.get("subject", "")).strip(),
+        received_at=str(row.get("received_at", "")).strip(),
+    )
+
+
+def mark_seen(state: dict[str, Any], key: str, *, max_seen: int) -> None:
+    seen = [value for value in state.get("seen_keys", []) if value != key]
+    seen.append(key)
+    if len(seen) > max_seen:
+        seen = seen[-max_seen:]
+    state["seen_keys"] = seen
+
+
+def clear_attempt(state: dict[str, Any], key: str) -> None:
+    attempts = dict(state.get("attempt_counts", {}))
+    attempts.pop(key, None)
+    state["attempt_counts"] = attempts
+
+
+def increment_attempt(state: dict[str, Any], key: str) -> int:
+    attempts = dict(state.get("attempt_counts", {}))
+    attempts[key] = int(attempts.get(key, 0)) + 1
+    state["attempt_counts"] = attempts
+    return attempts[key]
+
+
+def notify_user(row: dict[str, Any], reason: str) -> bool:
+    title = "Important Outlook Mail"
+    subtitle = str(row.get("from", "")).replace('"', "'").strip()[:120]
+    body = str(row.get("subject", "")).replace('"', "'").strip()[:220]
+    if reason:
+        body = f"{body} | {reason[:120].replace(chr(10), ' ')}"
+    script = f'display notification "{body}" with title "{title}" subtitle "{subtitle}"'
+    result = subprocess.run(
+        ["/usr/bin/osascript", "-e", script],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def run_cycle(
+    *,
+    state_path: Path,
+    event_log: Path,
+    screens: int,
+    limit: int,
+    include_pinned: bool,
+    rules_path: Path,
+    examples_path: Path,
+    notify: bool,
+    bootstrap_seen: bool,
+    max_seen: int,
+    max_retries: int,
+) -> dict[str, Any]:
+    ensure_outlook_session(DEFAULT_BROWSER, DEFAULT_PROFILE, DEFAULT_COOKIE_DOMAINS)
+
+    rows = fetch_recent_messages(screens=screens, limit=limit, recent_only=not include_pinned)
+    triaged, summary = triage_recent_messages(rows, rules_path=rules_path, examples_path=examples_path)
+    state = load_state(state_path)
+    seen = set(state.get("seen_keys", []))
+    folder_name = str(summary.get("nightly_digest_folder", "Night Review"))
+
+    payload = {
+        "timestamp": now_iso(),
+        "total_visible": len(triaged),
+        "new_visible": 0,
+        "important_notified": 0,
+        "night_moved": 0,
+        "move_failures": 0,
+        "baseline_only": False,
+        "nightly_digest_folder": folder_name,
+        "events": [],
+    }
+
+    if not folder_exists(folder_name):
+        raise BridgeError(f"Outlook folder not found: {folder_name}")
+
+    current_keys = [message_key(row) for row in triaged]
+    if bootstrap_seen and not state.get("initialized"):
+        for key in current_keys:
+            mark_seen(state, key, max_seen=max_seen)
+        state["initialized"] = True
+        state["updated_at"] = now_iso()
+        state["last_run"] = {**payload, "baseline_only": True}
+        save_state(state_path, state)
+        payload["baseline_only"] = True
+        return payload
+
+    for row in triaged:
+        key = message_key(row)
+        if key in seen:
+            continue
+        payload["new_visible"] += 1
+        event = {
+            "timestamp": now_iso(),
+            "key": key,
+            "from": row.get("from", ""),
+            "subject": row.get("subject", ""),
+            "bucket": row.get("bucket", ""),
+            "target_folder": row.get("target_folder", ""),
+        }
+
+        if row.get("pinned"):
+            event["action"] = "skip-pinned"
+            event["status"] = "seen"
+            mark_seen(state, key, max_seen=max_seen)
+            clear_attempt(state, key)
+        elif row.get("bucket") == "important_notify":
+            event["action"] = "notify"
+            if notify:
+                notified = notify_user(row, str(row.get("reason", "")))
+                event["status"] = "notified" if notified else "notify-failed"
+            else:
+                event["status"] = "logged"
+            if event["status"] == "notified":
+                payload["important_notified"] += 1
+            mark_seen(state, key, max_seen=max_seen)
+            clear_attempt(state, key)
+        elif row.get("bucket") == "night_digest":
+            attempt = int(state.get("attempt_counts", {}).get(key, 0))
+            if attempt >= max_retries:
+                event["action"] = "move-to-night-review"
+                event["status"] = "max-retries-exhausted"
+                event["attempt"] = attempt
+                mark_seen(state, key, max_seen=max_seen)
+            else:
+                result = move_message_to_folder(row, folder_name)
+                event["action"] = "move-to-night-review"
+                event["result"] = result
+                if result.get("ok"):
+                    event["status"] = "moved"
+                    payload["night_moved"] += 1
+                    mark_seen(state, key, max_seen=max_seen)
+                    clear_attempt(state, key)
+                else:
+                    event["status"] = "move-failed"
+                    event["attempt"] = increment_attempt(state, key)
+                    payload["move_failures"] += 1
+        else:
+            event["action"] = "log-only"
+            event["status"] = "seen"
+            mark_seen(state, key, max_seen=max_seen)
+            clear_attempt(state, key)
+
+        payload["events"].append(event)
+        append_jsonl(event_log, event)
+        seen = set(state.get("seen_keys", []))
+
+    state["initialized"] = True
+    state["updated_at"] = now_iso()
+    state["last_run"] = payload
+    save_state(state_path, state)
+    return payload
+
+
+def command_run_once(args: argparse.Namespace) -> int:
+    payload = run_cycle(
+        state_path=Path(args.state),
+        event_log=Path(args.event_log),
+        screens=args.screens,
+        limit=args.limit,
+        include_pinned=args.include_pinned,
+        rules_path=Path(args.rules),
+        examples_path=Path(args.examples),
+        notify=not args.no_notify,
+        bootstrap_seen=not args.no_bootstrap_seen,
+        max_seen=args.max_seen,
+        max_retries=args.max_retries,
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def command_watch(args: argparse.Namespace) -> int:
+    interval = max(10, int(args.interval))
+    while True:
+        try:
+            payload = run_cycle(
+                state_path=Path(args.state),
+                event_log=Path(args.event_log),
+                screens=args.screens,
+                limit=args.limit,
+                include_pinned=args.include_pinned,
+                rules_path=Path(args.rules),
+                examples_path=Path(args.examples),
+                notify=not args.no_notify,
+                bootstrap_seen=not args.no_bootstrap_seen,
+                max_seen=args.max_seen,
+                max_retries=args.max_retries,
+            )
+            print(json.dumps(payload, ensure_ascii=False), flush=True)
+        except KeyboardInterrupt:
+            return 0
+        except Exception as exc:
+            error_event = {
+                "timestamp": now_iso(),
+                "action": "watch-cycle",
+                "status": "error",
+                "error": str(exc),
+            }
+            append_jsonl(Path(args.event_log), error_event)
+            print(json.dumps(error_event, ensure_ascii=False), flush=True)
+        time.sleep(interval)
+
+
+def command_status(args: argparse.Namespace) -> int:
+    state = load_state(Path(args.state))
+    payload = {
+        "state_path": args.state,
+        "event_log": args.event_log,
+        "state": state,
+        "recent_events": load_recent_events(Path(args.event_log), limit=args.limit),
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Continuously monitor Outlook Web and triage new mail.")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    def add_common_arguments(subparser: argparse.ArgumentParser) -> None:
+        subparser.add_argument("--screens", type=int, default=4)
+        subparser.add_argument("--limit", type=int, default=20)
+        subparser.add_argument("--include-pinned", action="store_true")
+        subparser.add_argument("--rules", default=str(SHARED / "default_rules.json"))
+        subparser.add_argument("--examples", default=str(SHARED / "example_labeled_emails.jsonl"))
+        subparser.add_argument("--state", default=str(DEFAULT_STATE))
+        subparser.add_argument("--event-log", default=str(DEFAULT_EVENT_LOG))
+        subparser.add_argument("--action-log", default=str(DEFAULT_ACTION_LOG))
+        subparser.add_argument("--no-notify", action="store_true")
+        subparser.add_argument("--no-bootstrap-seen", action="store_true")
+        subparser.add_argument("--max-seen", type=int, default=500)
+        subparser.add_argument("--max-retries", type=int, default=3)
+
+    run_once = subparsers.add_parser("run-once", help="Poll once and handle new Outlook mail.")
+    add_common_arguments(run_once)
+    run_once.set_defaults(func=command_run_once)
+
+    watch = subparsers.add_parser("watch", help="Continuously poll Outlook Web and handle new mail.")
+    add_common_arguments(watch)
+    watch.add_argument("--interval", type=int, default=30, help="Polling interval in seconds.")
+    watch.set_defaults(func=command_watch)
+
+    status = subparsers.add_parser("status", help="Show monitor state and recent events.")
+    status.add_argument("--state", default=str(DEFAULT_STATE))
+    status.add_argument("--event-log", default=str(DEFAULT_EVENT_LOG))
+    status.add_argument("--limit", type=int, default=8)
+    status.set_defaults(func=command_status)
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    try:
+        return int(args.func(args))
+    except BridgeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

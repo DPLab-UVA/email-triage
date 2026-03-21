@@ -76,6 +76,12 @@ Build one local workflow that can:
   - target folder: `Night Review`
   - verified by moving one low-risk journal-invitation email out of Inbox
   - action-layer script: `browser/outlook_apply_triage.py`
+- A live poller now exists for Outlook Web:
+  - monitor script: `browser/outlook_live_monitor.py`
+  - state file: `shared/outlook_monitor_state.json`
+  - event log: `shared/outlook_monitor_events.jsonl`
+  - launchd wrapper: `launchd/outlook_monitor_ctl.sh`
+  - tmux wrapper: `browser/outlook_monitor_tmux_ctl.sh`
 - Atlas is now confirmed as a live visible Outlook session holder:
   - the Atlas app already has logged-in Outlook tabs
   - helper file: `browser/atlas_outlook_helper.py`
