@@ -10,6 +10,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlencode
 
 ATLAS_CLI = os.path.expanduser("~/.codex/skills/atlas/scripts/atlas_cli.py")
 OUTLOOK_PREFIXES = (
@@ -110,6 +111,27 @@ def command_open(args: argparse.Namespace) -> int:
     return print_json(payload) if args.json else 0
 
 
+def command_open_compose(args: argparse.Namespace) -> int:
+    query: dict[str, str] = {}
+    if args.to:
+        query["to"] = args.to
+    if args.cc:
+        query["cc"] = args.cc
+    if args.bcc:
+        query["bcc"] = args.bcc
+    if args.subject:
+        query["subject"] = args.subject
+    if args.body:
+        query["body"] = args.body
+
+    url = "https://outlook.office.com/mail/deeplink/compose"
+    if query:
+        url = f"{url}?{urlencode(query)}"
+    run_atlas("open-tab", url)
+    payload = {"action": "open-compose", "url": url, "query": query}
+    return print_json(payload) if args.json else 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Atlas helper focused on Outlook tabs.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -134,6 +156,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     open_parser.add_argument("--json", action="store_true")
     open_parser.set_defaults(func=command_open)
+
+    compose_parser = subparsers.add_parser("open-compose", help="Open a new Outlook compose tab in Atlas.")
+    compose_parser.add_argument("--to")
+    compose_parser.add_argument("--cc")
+    compose_parser.add_argument("--bcc")
+    compose_parser.add_argument("--subject", default="")
+    compose_parser.add_argument("--body", default="")
+    compose_parser.add_argument("--json", action="store_true")
+    compose_parser.set_defaults(func=command_open_compose)
 
     return parser
 
