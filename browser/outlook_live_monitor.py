@@ -19,9 +19,11 @@ from outlook_apply_triage import (
     move_message_to_folder,
 )
 from outlook_draft_helper import (
+    DEFAULT_FEEDBACK,
     DEFAULT_STYLE_PROFILE,
     DEFAULT_SUGGESTIONS,
     draft_reply_for_message,
+    harvest_sent_feedback,
     load_style_profile,
     save_suggestion,
 )
@@ -61,6 +63,7 @@ def load_state(path: Path) -> dict[str, Any]:
             "initialized": False,
             "seen_keys": [],
             "attempt_counts": {},
+            "last_feedback_scan_at": "",
             "last_run": {},
         }
     try:
@@ -72,6 +75,7 @@ def load_state(path: Path) -> dict[str, Any]:
             "initialized": False,
             "seen_keys": [],
             "attempt_counts": {},
+            "last_feedback_scan_at": "",
             "last_run": {"error": "state file was invalid json and was reset"},
         }
 
@@ -154,6 +158,20 @@ def notify_user(row: dict[str, Any], reason: str) -> bool:
     return result.returncode == 0
 
 
+def feedback_scan_due(state: dict[str, Any], interval_minutes: int) -> bool:
+    if interval_minutes <= 0:
+        return False
+    last_scan = str(state.get("last_feedback_scan_at", "")).strip()
+    if not last_scan:
+        return True
+    try:
+        previous = datetime.fromisoformat(last_scan)
+    except ValueError:
+        return True
+    delta = datetime.now().astimezone() - previous.astimezone()
+    return delta.total_seconds() >= interval_minutes * 60
+
+
 def run_cycle(
     *,
     state_path: Path,
@@ -168,6 +186,7 @@ def run_cycle(
     max_seen: int,
     max_retries: int,
     suggestions_path: Path,
+    feedback_path: Path,
     night_review_state_path: Path,
     night_review_event_log: Path,
 ) -> dict[str, Any]:
@@ -189,6 +208,9 @@ def run_cycle(
     reminder_hour = int(rules.get("nightly_digest_hour_local", 21))
     restore_hour = int(rules.get("night_review_restore_hour_local", 7))
     restore_folder = str(rules.get("night_review_restore_folder", "Inbox"))
+    feedback_scan_interval = max(0, int(rules.get("feedback_scan_interval_minutes", 60)))
+    feedback_scan_screens = max(1, int(rules.get("feedback_scan_screens", 8)))
+    feedback_scan_limit = max(1, int(rules.get("feedback_scan_limit", 40)))
 
     payload = {
         "timestamp": now_iso(),
@@ -316,6 +338,21 @@ def run_cycle(
         limit=max(20, limit),
         notify=notify,
     )
+    if feedback_scan_due(state, feedback_scan_interval):
+        try:
+            payload["draft_feedback_harvest"] = harvest_sent_feedback(
+                folder_name="Sent Items",
+                screens=feedback_scan_screens,
+                limit=feedback_scan_limit,
+                suggestions_path=suggestions_path,
+                feedback_path=feedback_path,
+            )
+        except Exception as exc:
+            payload["draft_feedback_harvest"] = {
+                "status": "error",
+                "error": str(exc),
+            }
+        state["last_feedback_scan_at"] = now_iso()
     state["initialized"] = True
     state["updated_at"] = now_iso()
     state["last_run"] = payload
@@ -337,6 +374,7 @@ def command_run_once(args: argparse.Namespace) -> int:
         max_seen=args.max_seen,
         max_retries=args.max_retries,
         suggestions_path=Path(args.suggestions),
+        feedback_path=Path(args.feedback),
         night_review_state_path=Path(args.night_review_state),
         night_review_event_log=Path(args.night_review_event_log),
     )
@@ -361,6 +399,7 @@ def command_watch(args: argparse.Namespace) -> int:
                 max_seen=args.max_seen,
                 max_retries=args.max_retries,
                 suggestions_path=Path(args.suggestions),
+                feedback_path=Path(args.feedback),
                 night_review_state_path=Path(args.night_review_state),
                 night_review_event_log=Path(args.night_review_event_log),
             )
@@ -405,6 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--event-log", default=str(DEFAULT_EVENT_LOG))
         subparser.add_argument("--action-log", default=str(DEFAULT_ACTION_LOG))
         subparser.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
+        subparser.add_argument("--feedback", default=str(DEFAULT_FEEDBACK))
         subparser.add_argument("--night-review-state", default=str(DEFAULT_NIGHT_REVIEW_STATE))
         subparser.add_argument("--night-review-event-log", default=str(DEFAULT_NIGHT_REVIEW_EVENT_LOG))
         subparser.add_argument("--no-notify", action="store_true")

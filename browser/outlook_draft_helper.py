@@ -9,6 +9,7 @@ import re
 import sys
 import time
 from datetime import datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
@@ -138,6 +139,13 @@ def latest_external_block(lines: list[str]) -> dict[str, str]:
     return {}
 
 
+def latest_self_block(lines: list[str]) -> dict[str, str]:
+    for block in reversed(extract_thread_blocks(lines)):
+        if block.get("sender", "") == "You":
+            return block
+    return {}
+
+
 def selected_row() -> dict[str, Any]:
     for row in current_visible_options():
         if row.get("selected"):
@@ -225,6 +233,7 @@ def parse_reading_pane(message: dict[str, Any], pane_text: str) -> dict[str, Any
 
     body_full = "\n".join(trimmed).strip()
     latest_incoming = latest_external_block(lines)
+    latest_self = latest_self_block(lines)
     return {
         **message,
         "from": sender,
@@ -233,6 +242,9 @@ def parse_reading_pane(message: dict[str, Any], pane_text: str) -> dict[str, Any
         "latest_incoming_sender": latest_incoming.get("sender", ""),
         "latest_incoming_body": latest_incoming.get("body", ""),
         "latest_incoming_timestamp": latest_incoming.get("timestamp", ""),
+        "latest_self_sender": latest_self.get("sender", ""),
+        "latest_self_body": latest_self.get("body", ""),
+        "latest_self_timestamp": latest_self.get("timestamp", ""),
     }
 
 
@@ -339,6 +351,7 @@ def save_feedback(
     note: str = "",
     source: str,
     final_body: str = "",
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "timestamp": now_iso(),
@@ -351,6 +364,8 @@ def save_feedback(
         "draft_reply": suggestion.get("draft_reply", ""),
         "final_compose_body": final_body,
     }
+    if extra:
+        payload.update(extra)
     append_jsonl(feedback_path, payload)
     return payload
 
@@ -371,6 +386,59 @@ def message_body_for_model(message: dict[str, Any]) -> str:
         or message.get("body")
         or ""
     ).strip()
+
+
+def message_body_for_feedback(message: dict[str, Any]) -> str:
+    return normalize_reply_text(
+        str(
+            message.get("latest_self_body")
+            or message.get("body_full")
+            or message.get("body")
+            or ""
+        )
+    )
+
+
+def feedback_identity(record: dict[str, Any]) -> str:
+    conversation_id = str(record.get("conversation_id", "")).strip()
+    if conversation_id:
+        return f"convid:{conversation_id}"
+    return "subject:{subject}|from:{sender}".format(
+        subject=str(record.get("subject", "")).strip(),
+        sender=str(record.get("from", "")).strip(),
+    )
+
+
+def load_feedback_identities(path: Path) -> set[str]:
+    identities: set[str] = set()
+    if not path.exists():
+        return identities
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            row = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        identities.add(feedback_identity(row))
+    return identities
+
+
+def compare_draft_to_final(suggested_text: str, final_text: str) -> dict[str, Any]:
+    suggested = normalize_reply_text(suggested_text)
+    final = normalize_reply_text(final_text)
+    if not final:
+        return {"status": "sent_no_body", "similarity": 0.0}
+    if suggested and final == suggested:
+        return {"status": "sent_as_is", "similarity": 1.0}
+    similarity = 0.0
+    if suggested:
+        similarity = SequenceMatcher(None, suggested.lower(), final.lower()).ratio()
+    return {
+        "status": "sent_modified" if suggested else "sent_without_suggestion",
+        "similarity": round(similarity, 3),
+    }
 
 
 def looks_automated_sender(sender: str) -> bool:
@@ -645,7 +713,7 @@ JSON.stringify(
       "subject": subject,
       "from": sender,
       "compose_body": normalize_reply_text(body),
-        **extra,
+      **extra,
     }
 
 
@@ -691,6 +759,75 @@ JSON.stringify(
     }
     append_jsonl(feedback_path, feedback)
     return feedback
+
+
+def harvest_sent_feedback(
+    *,
+    folder_name: str,
+    screens: int,
+    limit: int,
+    suggestions_path: Path,
+    feedback_path: Path,
+) -> dict[str, Any]:
+    ensure_session_ready()
+    rows = fetch_folder_messages(folder_name, screens=screens, limit=limit)
+    existing_feedback = load_feedback_identities(feedback_path)
+
+    harvested: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+
+    for row in rows:
+        suggestion = find_suggestion(
+            suggestions_path,
+            conversation_id=str(row.get("conversation_id", "")).strip(),
+            subject=str(row.get("subject", "")).strip(),
+        )
+        if not suggestion:
+            continue
+
+        identity = feedback_identity(suggestion)
+        if identity in existing_feedback:
+            continue
+
+        selected = select_visible_message(str(row.get("dom_id", "")), str(row.get("subject", "")))
+        if not selected.get("ok"):
+            skipped.append(
+                {
+                    "subject": row.get("subject", ""),
+                    "from": row.get("from", ""),
+                    "reason": f"select failed: {selected}",
+                }
+            )
+            continue
+
+        message = selected_message_payload()
+        final_body = message_body_for_feedback(message)
+        comparison = compare_draft_to_final(str(suggestion.get("draft_reply", "")), final_body)
+        payload = save_feedback(
+            feedback_path,
+            suggestion=suggestion,
+            status=str(comparison.get("status", "sent_modified")),
+            source="sent-harvest",
+            final_body=final_body,
+            extra={
+                "similarity": comparison.get("similarity", 0.0),
+                "matched_folder": folder_name,
+                "matched_subject": message.get("subject", ""),
+                "matched_from": message.get("from", ""),
+                "matched_dom_id": row.get("dom_id", ""),
+                "latest_self_timestamp": message.get("latest_self_timestamp", ""),
+            },
+        )
+        harvested.append(payload)
+        existing_feedback.add(identity)
+
+    return {
+        "folder": folder_name,
+        "scanned": len(rows),
+        "harvested": len(harvested),
+        "feedback": harvested,
+        "skipped_examples": skipped[:8],
+    }
 
 
 def discard_current_compose() -> dict[str, Any]:
@@ -818,6 +955,18 @@ def command_feedback(args: argparse.Namespace) -> int:
         note=str(args.note or ""),
         source="manual-feedback",
         final_body=str(args.final_body or ""),
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def command_harvest_sent_feedback(args: argparse.Namespace) -> int:
+    payload = harvest_sent_feedback(
+        folder_name=args.folder,
+        screens=args.screens,
+        limit=args.limit,
+        suggestions_path=Path(args.suggestions),
+        feedback_path=Path(args.feedback),
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
@@ -951,6 +1100,14 @@ def build_parser() -> argparse.ArgumentParser:
     feedback.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
     feedback.add_argument("--feedback", default=str(DEFAULT_FEEDBACK))
     feedback.set_defaults(func=command_feedback)
+
+    harvest = subparsers.add_parser("harvest-sent-feedback", help="Match draft suggestions against recent Sent Items and log automatic feedback.")
+    harvest.add_argument("--folder", default="Sent Items")
+    harvest.add_argument("--screens", type=int, default=8)
+    harvest.add_argument("--limit", type=int, default=40)
+    harvest.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
+    harvest.add_argument("--feedback", default=str(DEFAULT_FEEDBACK))
+    harvest.set_defaults(func=command_harvest_sent_feedback)
     return parser
 
 
