@@ -17,5 +17,6 @@ shared/*.jsonl
 shared/*.log
 shared/*_top20.json
 shared/fast_rule_summary.json
+shared/outlook_recent_*.json
 shared/outlook-browser-captures/
 .gstack/

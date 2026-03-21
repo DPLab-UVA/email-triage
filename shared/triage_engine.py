@@ -119,13 +119,13 @@ def infer_category(subject: str, body: str) -> str:
         ]
     ):
         return "bulk"
-    if any(token in text for token in ["security alert", "verification code", "code is", "2fa", "mfa"]):
+    if any(token in text for token in ["security alert", "verification code", "code is", "2fa", "mfa", "new login", "logged in to your account"]):
         return "security"
     if any(token in text for token in ["helpdesk", "ticket", "cshd-", "reply above this line", "repair"]):
         return "ticket"
     if any(token in text for token in ["submitted review", "review #", "hotcrp", "microsoft cmt"]):
         return "review"
-    if any(token in text for token in ["deadline", "due", "by friday", "by tomorrow", "asap"]):
+    if any(token in text for token in ["deadline", "due", "by friday", "by tomorrow", "asap", "pre-register", "register by"]):
         return "deadline"
     if any(token in text for token in ["meeting", "calendar", "schedule", "availability", "zoom"]):
         return "scheduling"

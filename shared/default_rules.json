@@ -1,6 +1,7 @@
 {
   "priority_threshold": 4,
   "nightly_digest_hour_local": 21,
+  "nightly_digest_folder": "Night Review",
   "force_important": [
     {
       "sender_contains": "noreply-travel@google.com",
@@ -14,6 +15,15 @@
       "sender_contains": "seas@virginia.edu",
       "subject_contains": "UVA Engineering Newsletter",
       "reason": "User wants the UVA Engineering newsletter to notify."
+    },
+    {
+      "subject_contains": "New login to your",
+      "reason": "Security login alerts should notify."
+    },
+    {
+      "sender_contains": "Microsoft CMT",
+      "subject_contains": "URGENT: Please pre-register",
+      "reason": "Conference registration deadlines should notify."
     }
   ],
   "force_not_important": [
@@ -69,7 +79,10 @@
     "follow-up",
     "repair",
     "due",
-    "asap"
+    "asap",
+    "new login",
+    "pre-register",
+    "register by"
   ],
   "ignore_senders": [
     "no-reply@example.com"
