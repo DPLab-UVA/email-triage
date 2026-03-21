@@ -76,6 +76,8 @@ def parse_option(row: dict[str, Any]) -> dict[str, Any] | None:
         "dom_id": row.get("dom_id", ""),
         "conversation_id": row.get("conversation_id", ""),
         "selected": bool(row.get("selected")),
+        "group_header": row.get("group_header", ""),
+        "pinned": bool(row.get("pinned")),
         "from": sender,
         "subject": subject,
         "received_at": received_at,
@@ -87,13 +89,30 @@ def parse_option(row: dict[str, Any]) -> dict[str, Any] | None:
 def current_visible_options() -> list[dict[str, Any]]:
     expr = """
 JSON.stringify(
-  Array.from(document.querySelectorAll('[role="option"]')).map((el, index) => ({
-    index,
-    dom_id: el.id || '',
-    conversation_id: el.getAttribute('data-convid') || '',
-    selected: el.getAttribute('aria-selected') === 'true',
-    raw_text: el.innerText || el.textContent || ''
-  })),
+  (() => {
+    const itemList = document.querySelector('[data-testid="virtuoso-item-list"]');
+    const wrappers = itemList ? Array.from(itemList.querySelectorAll(':scope > div[data-index]')) : [];
+    let currentHeader = '';
+    const rows = [];
+    for (const wrapper of wrappers) {
+      const header = wrapper.querySelector('[id^="groupHeader"] .PukTV');
+      if (header) {
+        currentHeader = (header.innerText || header.textContent || '').trim();
+      }
+      const el = wrapper.querySelector('[role="option"]');
+      if (!el) continue;
+      rows.push({
+        index: rows.length,
+        dom_id: el.id || '',
+        conversation_id: el.getAttribute('data-convid') || '',
+        selected: el.getAttribute('aria-selected') === 'true',
+        group_header: currentHeader,
+        pinned: currentHeader === 'Pinned',
+        raw_text: el.innerText || el.textContent || ''
+      });
+    }
+    return rows;
+  })(),
   null,
   2
 )
@@ -178,13 +197,17 @@ def triage_recent_messages(
         "important_notify": 0,
         "night_digest": 0,
         "auto_action": 0,
+        "pinned_hold": 0,
         "nightly_digest_folder": digest_folder,
         "examples": {"useful": [], "not_useful": []},
     }
 
     for row in rows:
         triage = triage_message(row, rules, examples)
-        if triage.get("action") == "notify-and-draft":
+        if row.get("pinned"):
+            bucket = "pinned_hold"
+            useful = True
+        elif triage.get("action") == "notify-and-draft":
             bucket = "important_notify"
             useful = True
         elif triage.get("action") == "queue-auto-decline-review-invite":
@@ -194,12 +217,16 @@ def triage_recent_messages(
             bucket = "night_digest"
             useful = False
 
+        reason = "; ".join(triage.get("reasons", [])) or triage.get("category", "")
+        if row.get("pinned"):
+            reason = "pinned by user; keep in inbox for later review/reply"
+
         record = {
             **row,
             "useful": useful,
             "bucket": bucket,
             "target_folder": digest_folder if bucket in {"night_digest", "auto_action"} else "",
-            "reason": "; ".join(triage.get("reasons", [])) or triage.get("category", ""),
+            "reason": reason,
             "triage": triage,
         }
         records.append(record)
