@@ -7,7 +7,9 @@ output/
 
 # Runtime state and virtualenvs
 **/.venv/
+**/.venv-social/
 **/state/
+tmp/
 
 # Private mail captures and generated review queues
 outlook-capture-*.json

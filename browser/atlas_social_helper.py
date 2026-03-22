@@ -98,6 +98,75 @@ def focus_tab(tab: AtlasTab) -> None:
     run_atlas("focus-tab", str(tab.window_id), str(tab.tab_index))
 
 
+def raise_window_by_title(title_substring: str) -> bool:
+    script = r"""
+import Cocoa
+import ApplicationServices
+
+let needle = CommandLine.arguments[1]
+
+func attr(_ el: AXUIElement, _ name: String) -> AnyObject? {
+    var value: CFTypeRef?
+    let err = AXUIElementCopyAttributeValue(el, name as CFString, &value)
+    return err == .success ? (value as AnyObject?) : nil
+}
+
+func strAttr(_ el: AXUIElement, _ name: String) -> String {
+    (attr(el, name) as? String) ?? ""
+}
+
+let apps = NSRunningApplication.runningApplications(withBundleIdentifier: "com.openai.atlas")
+guard let app = apps.first else {
+    print("NOT_RUNNING")
+    exit(2)
+}
+let appEl = AXUIElementCreateApplication(app.processIdentifier)
+let windows = (attr(appEl, kAXWindowsAttribute as String) as? [AXUIElement]) ?? []
+for win in windows {
+    let title = strAttr(win, kAXTitleAttribute as String)
+    if title.localizedCaseInsensitiveContains(needle) {
+        let err = AXUIElementPerformAction(win, kAXRaiseAction as CFString)
+        if err == .success {
+            print("RAISED")
+            exit(0)
+        } else {
+            print("RAISE_ERR:\(err.rawValue)")
+            exit(1)
+        }
+    }
+}
+print("NOT_FOUND")
+exit(1)
+""".strip()
+    result = subprocess.run(
+        ["swift", "-", title_substring],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0 and "RAISED" in (result.stdout or "")
+
+
+def preferred_window_needles(platform: str, tab: AtlasTab | None = None) -> list[str]:
+    needles: list[str] = []
+    if tab and tab.title:
+        needles.append(tab.title)
+    if platform == "x":
+        needles.extend(["Compose new post / X", "Home / X"])
+    elif platform == "linkedin":
+        needles.extend(["Feed | LinkedIn", "LinkedIn"])
+    elif platform == "xiaohongshu":
+        needles.extend(["小红书创作服务平台"])
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for needle in needles:
+        if needle and needle not in seen:
+            deduped.append(needle)
+            seen.add(needle)
+    return deduped
+
+
 def open_compose_tab(platform: str) -> AtlasTab:
     url = PLATFORM_URLS[platform]
     run_atlas("open-tab", url)
@@ -115,6 +184,10 @@ def ensure_compose_tab(platform: str, *, fresh: bool = False) -> AtlasTab:
     else:
         focus_tab(tab)
         time.sleep(0.3)
+    for needle in preferred_window_needles(platform, tab):
+        if raise_window_by_title(needle):
+            time.sleep(0.2)
+            break
     return tab
 
 
