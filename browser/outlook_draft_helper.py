@@ -468,6 +468,37 @@ def looks_automated_sender(sender: str) -> bool:
     return any(token in value for token in automated_hints)
 
 
+def looks_automated_message(message: dict[str, Any]) -> bool:
+    sender = str(message.get("from", "")).strip().lower()
+    subject = str(message.get("subject", "")).strip().lower()
+    body = message_body_for_model(message).lower()
+    automated_hints = [
+        "unsubscribe",
+        "view in browser",
+        "do not reply",
+        "donotreply",
+        "no-reply",
+        "noreply",
+        "notification",
+        "alert",
+        "newsletter",
+        "tracked flight",
+        "price alert",
+        "google flights",
+        "google scholar",
+        "call for papers",
+        "invitation to contribute",
+        "invitation to review",
+        "submit your paper",
+        "full apc waived",
+        "featured:",
+    ]
+    if looks_automated_sender(sender):
+        return True
+    haystacks = [sender, subject, body]
+    return any(token in text for token in automated_hints for text in haystacks)
+
+
 def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
     category = str(triage.get("category", "")).strip().lower()
     subject = str(message.get("subject", "")).strip().lower()
@@ -507,11 +538,11 @@ def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
     )
     if not triage.get("important"):
         return False
+    if looks_automated_message(message):
+        return False
     if message.get("pinned") and not looks_automated_sender(sender):
         return actionable
     if category in {"security", "review", "review_invitation", "ticket"}:
-        return False
-    if looks_automated_sender(sender):
         return False
     if any(
         token in subject or token in body
