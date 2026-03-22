@@ -25,7 +25,7 @@ from outlook_draft_helper import (
     draft_reply_for_message,
     harvest_sent_feedback,
     load_style_profile,
-    save_suggestion,
+    open_outlook_reply_draft,
 )
 from outlook_night_review import (
     DEFAULT_EVENT_LOG as DEFAULT_NIGHT_REVIEW_EVENT_LOG,
@@ -274,8 +274,7 @@ def run_cycle(
                 style_profile,
             )
             if draft_reply:
-                event["draft_suggestion"] = save_suggestion(
-                    suggestions_path,
+                event["outlook_draft"] = open_outlook_reply_draft(
                     {
                         **row,
                         "body_full": row.get("body", ""),
@@ -284,7 +283,6 @@ def run_cycle(
                         **row.get("triage", {}),
                         "draft_reply": draft_reply,
                     },
-                    source="live-monitor",
                 )
             if notify:
                 notified = notify_user(row, str(row.get("reason", "")))

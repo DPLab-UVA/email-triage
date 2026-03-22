@@ -734,6 +734,46 @@ JSON.stringify(
     }
 
 
+def open_outlook_reply_draft(
+    message: dict[str, Any],
+    triage: dict[str, Any],
+    *,
+    force: bool = False,
+) -> dict[str, Any]:
+    draft_reply = str(triage.get("draft_reply", "")).strip()
+    if not draft_reply and not force:
+        return {"ok": False, "reason": "no-draft-reply"}
+    if compose_open():
+        return {
+            "ok": False,
+            "reason": "compose-already-open",
+            "compose_state": current_compose_state(),
+        }
+
+    selected = select_visible_message(str(message.get("dom_id", "")), str(message.get("subject", "")))
+    if not selected.get("ok"):
+        return {"ok": False, "reason": "select-failed", "selection": selected}
+
+    open_result = ensure_reply_open()
+    if not open_result.get("ok"):
+        return {"ok": False, "reason": "reply-open-failed", "selection": selected, "open_result": open_result}
+
+    insert_result = set_compose_body(draft_reply)
+    if not insert_result.get("ok"):
+        return {"ok": False, "reason": "compose-insert-failed", "selection": selected, "open_result": open_result, "insert_result": insert_result}
+
+    time.sleep(0.4)
+    compose_state = current_compose_state()
+    return {
+        "ok": True,
+        "selection": selected,
+        "open_result": open_result,
+        "insert_result": insert_result,
+        "compose_state": compose_state,
+        "draft_reply": draft_reply,
+    }
+
+
 def send_current_compose(feedback_path: Path, suggestions_path: Path) -> dict[str, Any]:
     compose = current_compose_state()
     suggestion = latest_suggestion(suggestions_path, subject=compose["subject"], sender=compose["from"])
@@ -899,30 +939,18 @@ def command_reply_selected(args: argparse.Namespace) -> int:
         Path(args.examples),
         Path(args.style_profile),
     )
-    draft_reply = str(triage.get("draft_reply", "")).strip()
-    if not draft_reply and not args.force:
-        raise BridgeError("Selected message is not currently classified for drafting; use --force if you want to inject anyway")
+    payload = open_outlook_reply_draft(message, triage, force=args.force)
+    if not payload.get("ok"):
+        raise BridgeError(str(payload))
 
-    suggestion = save_suggestion(Path(args.suggestions), message, triage, source="reply-selected")
-    open_result = ensure_reply_open()
-    if not open_result.get("ok"):
-        raise BridgeError(str(open_result))
-
-    inserted = None
-    if args.insert:
-        inserted = set_compose_body(draft_reply)
-        if not inserted.get("ok"):
-            raise BridgeError(str(inserted))
-
-    payload = {
+    result = {
         "message": message,
         "triage": triage,
-        "suggestion": suggestion,
-        "open_result": open_result,
-        "insert_result": inserted,
-        "compose_state": current_compose_state(),
+        "outlook_draft": payload,
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    if args.log:
+        result["suggestion"] = save_suggestion(Path(args.suggestions), message, triage, source="reply-selected")
+    print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -1086,13 +1114,13 @@ def build_parser() -> argparse.ArgumentParser:
     suggest_folder.add_argument("--style-profile", default=str(DEFAULT_STYLE_PROFILE))
     suggest_folder.set_defaults(func=command_suggest_folder)
 
-    reply = subparsers.add_parser("reply-selected", help="Open Outlook reply compose and optionally inject the draft.")
+    reply = subparsers.add_parser("reply-selected", help="Open Outlook reply compose and inject the draft into Outlook.")
     reply.add_argument("--rules", default=str(SHARED / "default_rules.json"))
     reply.add_argument("--examples", default=str(SHARED / "example_labeled_emails.jsonl"))
     reply.add_argument("--suggestions", default=str(DEFAULT_SUGGESTIONS))
     reply.add_argument("--style-profile", default=str(DEFAULT_STYLE_PROFILE))
-    reply.add_argument("--insert", action="store_true")
     reply.add_argument("--force", action="store_true")
+    reply.add_argument("--log", action="store_true")
     reply.set_defaults(func=command_reply_selected)
 
     compose = subparsers.add_parser("compose", help="Inspect the currently open Outlook compose state.")
