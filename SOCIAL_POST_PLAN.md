@@ -27,6 +27,8 @@ Execution path:
   - tmux session: `email-triage-social-browse`
   - state: `.gstack/bridge-browse-social.json`
   - log: `.gstack/bridge-browse-social-server.log`
+- visible Atlas path for already-logged-in sessions:
+  - file: `browser/atlas_social_helper.py`
 
 ## Why Separate It
 
@@ -40,6 +42,7 @@ So the social path must use its own browser bridge session.
 
 - Multi-session bridge support now exists in `browser/gstack_browse_bridge.py`
 - Social posting workflow exists in `browser/social_post_workflow.py`
+- Visible Atlas social helper exists in `browser/atlas_social_helper.py`
 - Current commands:
   - `bootstrap`
   - `status`
@@ -54,19 +57,28 @@ So the social path must use its own browser bridge session.
 - LinkedIn cookies import works, but the current Chrome `Profile 1` session lands on the LinkedIn sign-in page.
 - X cookies import works partially, but the current session does not produce a stable logged-in home page yet.
 - Xiaohongshu cookies import works partially, but the current creator page still needs a cleaner logged-in/editor detection path.
+- Atlas already holds live logged-in tabs for:
+  - `X`
+  - `LinkedIn`
+  - regular `Xiaohongshu` browsing
+- Atlas-visible draft injection is now verified for:
+  - `X`
+  - `LinkedIn`
+- Xiaohongshu still needs a separate login on `creator.xiaohongshu.com`; the regular browse session on `www.xiaohongshu.com` is not enough for publishing.
 
 So the code path is ready, but at least some platforms still need a live logged-in browser session before drafting can work end to end.
 
 ## Near-Term Steps
 
 1. Stabilize login/session detection for all three platforms.
-2. Confirm compose selectors on each platform with a real logged-in session.
+2. Keep the Atlas path as the fastest route for visible drafting on platforms where Atlas is already logged in.
 3. Make `draft` write text reliably without publishing.
-4. Add optional local queue files for:
+4. Add Xiaohongshu creator login support and then implement its draft injection.
+5. Add optional local queue files for:
    - post ideas
    - pending drafts
    - approved-to-post items
-5. Add a second-stage workflow:
+6. Add a second-stage workflow:
    - generate candidate post from source material
    - prepare draft in platform UI
    - wait for user review
