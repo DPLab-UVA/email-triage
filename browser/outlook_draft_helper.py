@@ -504,6 +504,7 @@ def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
     subject = str(message.get("subject", "")).strip().lower()
     sender = str(message.get("from", "")).strip()
     body = message_body_for_model(message).lower()
+    llm_judgment = triage.get("llm_judgment", {}) or {}
     if any(
         token in body
         for token in [
@@ -537,6 +538,8 @@ def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
         ]
     )
     if not triage.get("important"):
+        return False
+    if "needs_reply" in llm_judgment and not bool(llm_judgment.get("needs_reply")):
         return False
     if looks_automated_message(message):
         return False

@@ -4,13 +4,20 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 WORD_RE = re.compile(r"[A-Za-z0-9_@.+-]+")
+SHARED = Path(__file__).resolve().parent
+ROOT = SHARED.parent
+DEFAULT_LLM_SCHEMA = SHARED / "triage_llm_schema.json"
+_CACHE_MEMO: dict[str, dict[str, Any]] = {}
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -30,6 +37,13 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
 
 def normalize_text(value: str | None) -> str:
     return (value or "").strip()
+
+
+def clipped_text(value: str | None, max_chars: int) -> str:
+    text = normalize_text(value)
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + " ..."
 
 
 def sender_email(sender: str) -> str:
@@ -67,6 +81,29 @@ def tokenize(*values: str) -> set[str]:
 def keyword_matches(keywords: list[str], haystack: str) -> list[str]:
     lower_haystack = haystack.lower()
     return [keyword for keyword in keywords if keyword.lower() in lower_haystack]
+
+
+def load_cache(path: Path) -> dict[str, Any]:
+    cache_key = str(path.resolve())
+    if cache_key in _CACHE_MEMO:
+        return _CACHE_MEMO[cache_key]
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                _CACHE_MEMO[cache_key] = data
+                return data
+        except json.JSONDecodeError:
+            pass
+    _CACHE_MEMO[cache_key] = {}
+    return _CACHE_MEMO[cache_key]
+
+
+def save_cache(path: Path, cache: dict[str, Any]) -> None:
+    cache_key = str(path.resolve())
+    _CACHE_MEMO[cache_key] = cache
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def is_automated_sender(sender: str) -> bool:
@@ -257,7 +294,166 @@ def build_draft(message: dict[str, Any], rules: dict[str, Any], category: str) -
     return "\n".join(lines)
 
 
-def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: list[dict[str, Any]]) -> dict[str, Any]:
+def message_metadata(message: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "from": normalize_text(message.get("from")),
+        "subject": normalize_text(message.get("subject")),
+        "message_id": message.get("message_id", ""),
+        "mailbox_id": message.get("id", ""),
+    }
+
+
+def broad_policy_summary(rules: dict[str, Any]) -> str:
+    lines = [f"- {line}" for line in rules.get("decision_principles", []) if normalize_text(line)]
+    return "\n".join(lines)
+
+
+def heuristic_summary_for_prompt(heuristic: dict[str, Any]) -> str:
+    parts = [
+        f"sender_kind: {'human' if heuristic.get('human_sender') else 'automated_or_system'}",
+        f"heuristic_category: {heuristic.get('category', 'generic')}",
+        f"heuristic_bucket: {'important_notify' if heuristic.get('important') else 'night_digest'}",
+        f"heuristic_score: {heuristic.get('score', 0.0)}",
+    ]
+    reasons = heuristic.get("reasons", [])
+    if reasons:
+        parts.append("heuristic_reasons: " + " | ".join(reasons[:6]))
+    return "\n".join(parts)
+
+
+def top_similar_examples(message_text: str, examples: list[dict[str, Any]], limit: int = 4) -> list[dict[str, Any]]:
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for example in examples:
+        similarity = similarity_score(message_text, example)
+        if similarity <= 0:
+            continue
+        scored.append((similarity, example))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    rows: list[dict[str, Any]] = []
+    for similarity, example in scored[:limit]:
+        rows.append(
+            {
+                "label": example.get("label", ""),
+                "from": normalize_text(example.get("from")),
+                "subject": normalize_text(example.get("subject")),
+                "similarity": round(similarity, 2),
+            }
+        )
+    return rows
+
+
+def llm_cache_key(message: dict[str, Any], rules: dict[str, Any]) -> str:
+    llm_cfg = rules.get("llm_triage", {}) or {}
+    payload = {
+        "policy_version": rules.get("policy_version", 1),
+        "provider": llm_cfg.get("provider", "codex"),
+        "model": llm_cfg.get("model", ""),
+        "from": normalize_text(message.get("from")),
+        "subject": normalize_text(message.get("subject")),
+        "body": clipped_text(message.get("body"), int(llm_cfg.get("max_body_chars", 5000))),
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def run_codex_llm_judge(prompt: str, *, model: str, timeout_seconds: int) -> dict[str, Any]:
+    with tempfile.NamedTemporaryFile(prefix="triage-judge-", suffix=".json", delete=False) as handle:
+        output_path = Path(handle.name)
+    command = [
+        "/opt/homebrew/bin/codex",
+        "exec",
+        "-",
+        "--skip-git-repo-check",
+        "--cd",
+        str(ROOT),
+        "--sandbox",
+        "read-only",
+        "--output-schema",
+        str(DEFAULT_LLM_SCHEMA),
+        "--output-last-message",
+        str(output_path),
+    ]
+    if model:
+        command.extend(["--model", model])
+    try:
+        result = subprocess.run(
+            command,
+            input=prompt,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=max(5, timeout_seconds),
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"codex exited {result.returncode}")
+        raw = output_path.read_text(encoding="utf-8").strip()
+        return json.loads(raw)
+    finally:
+        output_path.unlink(missing_ok=True)
+
+
+def llm_judge_message(message: dict[str, Any], rules: dict[str, Any], examples: list[dict[str, Any]], heuristic: dict[str, Any]) -> dict[str, Any] | None:
+    llm_cfg = rules.get("llm_triage", {}) or {}
+    if not llm_cfg.get("enabled"):
+        return None
+
+    provider = normalize_text(llm_cfg.get("provider") or "codex").lower()
+    if provider != "codex":
+        return None
+
+    cache_path = Path(str(llm_cfg.get("cache_path") or (SHARED / "triage_llm_cache.json")))
+    cache = load_cache(cache_path)
+    key = llm_cache_key(message, rules)
+    cached = cache.get(key)
+    if isinstance(cached, dict):
+        return cached
+
+    message_text = f"{normalize_text(message.get('subject'))}\n{normalize_text(message.get('body'))}"
+    examples_block = top_similar_examples(message_text, examples)
+    prompt = f"""
+You are triaging one email for Tianhao.
+
+Return exactly one JSON object that matches the provided schema.
+
+Hard boundaries already handled elsewhere:
+- publication/review invitations can be auto-declined upstream
+- pinned mail is kept separately
+- automated mail should almost never need a reply draft
+
+Broad decision principles:
+{broad_policy_summary(rules)}
+
+You are deciding only between:
+- important_notify: keep in Inbox and notify now
+- night_digest: move to Night Review for later
+
+Message:
+from: {normalize_text(message.get('from'))}
+subject: {normalize_text(message.get('subject'))}
+body:
+{clipped_text(message.get('body'), int(llm_cfg.get('max_body_chars', 5000)))}
+
+Heuristic context (advisory only, not binding):
+{heuristic_summary_for_prompt(heuristic)}
+
+Closest labeled examples:
+{json.dumps(examples_block, ensure_ascii=False, indent=2)}
+
+Rules for needs_reply:
+- true only if this is likely a human thread that deserves a near-term human reply
+- false for automated, mass, bulk, newsletter, alert, or generic notification emails
+""".strip()
+
+    decision = run_codex_llm_judge(
+        prompt,
+        model=str(llm_cfg.get("model", "")).strip(),
+        timeout_seconds=int(llm_cfg.get("timeout_seconds", 90)),
+    )
+    cache[key] = decision
+    save_cache(cache_path, cache)
+    return decision
+
+
+def heuristic_triage(message: dict[str, Any], rules: dict[str, Any], examples: list[dict[str, Any]]) -> dict[str, Any]:
     subject = normalize_text(message.get("subject"))
     body = normalize_text(message.get("body"))
     sender = normalize_text(message.get("from"))
@@ -275,13 +471,9 @@ def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: lis
                 "action": "digest-later",
                 "category": "override",
                 "reasons": [f"forced not important: {override.get('reason', 'override')}"],
-                "message": {
-                    "from": sender,
-                    "subject": subject,
-                    "message_id": message.get("message_id", ""),
-                    "mailbox_id": message.get("id", ""),
-                },
+                "message": message_metadata(message),
                 "draft_reply": "",
+                "decision_source": "rule",
             }
 
     for override in rules.get("force_important", []):
@@ -293,13 +485,9 @@ def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: lis
                 "action": "notify-and-draft",
                 "category": "override",
                 "reasons": [f"forced important: {override.get('reason', 'override')}"],
-                "message": {
-                    "from": sender,
-                    "subject": subject,
-                    "message_id": message.get("message_id", ""),
-                    "mailbox_id": message.get("id", ""),
-                },
+                "message": message_metadata(message),
                 "draft_reply": build_draft(message, rules, "generic"),
+                "decision_source": "rule",
             }
 
     score = 0.0
@@ -342,13 +530,9 @@ def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: lis
             "action": "queue-auto-decline-invitation",
             "category": category,
             "reasons": ["publication invitation should be auto-declined for this user"],
-            "message": {
-                "from": sender,
-                "subject": subject,
-                "message_id": message.get("message_id", ""),
-                "mailbox_id": message.get("id", ""),
-            },
+            "message": message_metadata(message),
             "draft_reply": build_draft(message, rules, category),
+            "decision_source": "rule",
         }
     if category in {"deadline", "request", "scheduling", "ticket", "review", "security"}:
         score += 1
@@ -404,14 +588,48 @@ def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: lis
         "action": action,
         "category": category,
         "reasons": reasons,
-        "message": {
-            "from": sender,
-            "subject": subject,
-            "message_id": message.get("message_id", ""),
-            "mailbox_id": message.get("id", ""),
-        },
+        "message": message_metadata(message),
         "draft_reply": draft,
+        "human_sender": human_sender,
+        "decision_source": "heuristic",
     }
+
+
+def apply_llm_decision(message: dict[str, Any], rules: dict[str, Any], heuristic: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
+    bucket = normalize_text(decision.get("bucket")).lower()
+    if bucket not in {"important_notify", "night_digest"}:
+        bucket = "important_notify" if heuristic.get("important") else "night_digest"
+    important = bucket == "important_notify"
+    category = normalize_text(decision.get("category_hint")) or str(heuristic.get("category", "generic"))
+    reason = normalize_text(decision.get("reason")) or "llm judgment"
+    reasons = [*heuristic.get("reasons", []), f"llm: {reason}"]
+    return {
+        "important": important,
+        "score": float(heuristic.get("score", 0.0)),
+        "threshold": float(heuristic.get("threshold", rules.get("priority_threshold", 4))),
+        "action": "notify-and-draft" if important else "digest-later",
+        "category": category,
+        "reasons": reasons,
+        "message": heuristic.get("message", message_metadata(message)),
+        "draft_reply": build_draft(message, rules, category) if important else "",
+        "human_sender": heuristic.get("human_sender"),
+        "decision_source": "llm",
+        "llm_judgment": decision,
+    }
+
+
+def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: list[dict[str, Any]]) -> dict[str, Any]:
+    heuristic = heuristic_triage(message, rules, examples)
+    if heuristic.get("decision_source") == "rule":
+        return heuristic
+    try:
+        llm_decision = llm_judge_message(message, rules, examples, heuristic)
+    except Exception as exc:
+        heuristic.setdefault("reasons", []).append(f"llm fallback: {exc}")
+        return heuristic
+    if not llm_decision:
+        return heuristic
+    return apply_llm_decision(message, rules, heuristic, llm_decision)
 
 
 def build_parser() -> argparse.ArgumentParser:

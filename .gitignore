@@ -21,5 +21,6 @@ shared/outlook_monitor_*.json
 shared/outlook_night_review_*.json
 shared/outlook_recent_*.json
 shared/outlook_reply_style_*.json
+shared/triage_llm_cache.json
 shared/outlook-browser-captures/
 .gstack/

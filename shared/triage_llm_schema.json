@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "important": {
+      "type": "boolean"
+    },
+    "bucket": {
+      "type": "string",
+      "enum": [
+        "important_notify",
+        "night_digest"
+      ]
+    },
+    "needs_reply": {
+      "type": "boolean"
+    },
+    "category_hint": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  },
+  "required": [
+    "important",
+    "bucket",
+    "needs_reply",
+    "category_hint",
+    "reason",
+    "confidence"
+  ]
+}
