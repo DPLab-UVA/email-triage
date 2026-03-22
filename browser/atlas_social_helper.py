@@ -280,9 +280,12 @@ def command_draft(args: argparse.Namespace) -> int:
     result = paste_and_verify(args.text)
     payload = {
         "action": "draft",
+        "mode": "editor_prepared",
         "platform": args.platform,
         "tab": {**tab.__dict__, "platform": tab.platform, "is_compose": tab.is_compose, "logged_out": logged_out(tab)},
         "result": result,
+        "persistence_verified": False,
+        "note": "This verifies text in the live compose editor only. It does not verify that the platform saved a server-side draft entry.",
     }
     return print_json(payload) if args.json else 0
 
