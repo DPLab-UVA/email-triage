@@ -226,7 +226,7 @@ def triage_recent_messages(
         elif triage.get("action") == "notify-and-draft":
             bucket = "important_notify"
             useful = True
-        elif triage.get("action") == "queue-auto-decline-review-invite":
+        elif str(triage.get("action", "")).startswith("queue-auto-decline"):
             bucket = "auto_action"
             useful = False
         else:

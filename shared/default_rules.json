@@ -68,6 +68,21 @@
       "reason": "Submitted review receipts are low priority."
     },
     {
+      "sender_contains": "HotCRP",
+      "subject_contains": "Comment for #",
+      "reason": "HotCRP comment notifications are useful but not urgent."
+    },
+    {
+      "sender_contains": "HotCRP",
+      "subject_contains": "Response for #",
+      "reason": "HotCRP response notifications are useful but not urgent."
+    },
+    {
+      "sender_contains": "HotCRP",
+      "subject_contains": "Draft response for #",
+      "reason": "HotCRP draft-response reminders are not urgent."
+    },
+    {
       "subject_contains": "Agentic AI Summit 2026",
       "reason": "External summit promo should not notify."
     },

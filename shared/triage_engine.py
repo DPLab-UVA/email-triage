@@ -105,6 +105,20 @@ def infer_category(subject: str, body: str) -> str:
     if any(
         token in text
         for token in [
+            "invitation to contribute",
+            "invitation to submit",
+            "invite you to contribute",
+            "call for papers",
+            "submit your manuscript",
+            "full apc waived",
+            "apc waived",
+            "waived apc",
+        ]
+    ):
+        return "submission_invitation"
+    if any(
+        token in text
+        for token in [
             "newsletter",
             "unsubscribe",
             "digest",
@@ -152,6 +166,8 @@ def build_draft(message: dict[str, Any], rules: dict[str, Any], category: str) -
         body = "Thanks for the alert. I saw the security-related message and will verify the account status right away."
     elif category == "review_invitation":
         body = "Thank you for the invitation. I am unavailable to review this manuscript."
+    elif category == "submission_invitation":
+        body = "Thank you for the invitation. I will not be submitting to this venue."
     elif category == "request":
         body = prefs.get(
             "ask_for_clarification_template",
@@ -243,14 +259,14 @@ def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: lis
         reasons.append(f"ignore keywords: {', '.join(sorted(set(ignore_hits)))}")
 
     category = infer_category(subject, body)
-    if category == "review_invitation":
+    if category in {"review_invitation", "submission_invitation"}:
         return {
             "important": False,
             "score": -50.0,
             "threshold": float(rules.get("priority_threshold", 4)),
-            "action": "queue-auto-decline-review-invite",
+            "action": "queue-auto-decline-invitation",
             "category": category,
-            "reasons": ["journal review invitation should be auto-declined for this user"],
+            "reasons": ["publication invitation should be auto-declined for this user"],
             "message": {
                 "from": sender,
                 "subject": subject,

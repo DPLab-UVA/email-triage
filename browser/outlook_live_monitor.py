@@ -295,16 +295,16 @@ def run_cycle(
                 payload["important_notified"] += 1
             mark_seen(state, key, max_seen=max_seen)
             clear_attempt(state, key)
-        elif row.get("bucket") == "night_digest":
+        elif row.get("bucket") in {"night_digest", "auto_action"}:
             attempt = int(state.get("attempt_counts", {}).get(key, 0))
             if attempt >= max_retries:
-                event["action"] = "move-to-night-review"
+                event["action"] = "queue-auto-action" if row.get("bucket") == "auto_action" else "move-to-night-review"
                 event["status"] = "max-retries-exhausted"
                 event["attempt"] = attempt
                 mark_seen(state, key, max_seen=max_seen)
             else:
                 result = move_message_to_folder(row, folder_name)
-                event["action"] = "move-to-night-review"
+                event["action"] = "queue-auto-action" if row.get("bucket") == "auto_action" else "move-to-night-review"
                 event["result"] = result
                 if result.get("ok"):
                     event["status"] = "moved"

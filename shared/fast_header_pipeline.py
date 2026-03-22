@@ -155,7 +155,7 @@ def main() -> int:
         output_records.append(record)
         if triage.get("action") == "digest-later":
             digest_records.append(record)
-        if triage.get("action") == "queue-auto-decline-review-invite":
+        if str(triage.get("action", "")).startswith("queue-auto-decline"):
             auto_action_records.append(record)
 
     output_path = Path(args.output)
