@@ -458,6 +458,8 @@ def looks_automated_sender(sender: str) -> bool:
         "bookstores",
         "editorial",
         "helpdesk",
+        "google flights",
+        "google scholar",
         "scholarcitations",
         "security",
         "center for faculty",
@@ -515,6 +517,10 @@ def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
         token in subject or token in body
         for token in [
             "new login to your",
+            "tracked flight",
+            "price alert",
+            "google flights",
+            "google scholar",
             "submitted review #",
             "comment for #",
             "response for #",
