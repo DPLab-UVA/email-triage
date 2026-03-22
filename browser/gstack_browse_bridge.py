@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -16,8 +17,8 @@ from typing import Any
 PROJECT_ROOT = Path("/Users/tianhao/Downloads/email-triage-lab")
 GSTACK_ROOT = Path("/Users/tianhao/gstack")
 STATE_DIR = PROJECT_ROOT / ".gstack"
-STATE_FILE = STATE_DIR / "bridge-browse.json"
-TMUX_SESSION = "email-triage-browse"
+DEFAULT_STATE_FILE = STATE_DIR / "bridge-browse.json"
+DEFAULT_TMUX_SESSION = "email-triage-browse"
 DEFAULT_SERVER_LOG = STATE_DIR / "bridge-browse-server.log"
 
 
@@ -36,9 +37,24 @@ def run_cmd(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return result
 
 
+def bridge_state_file() -> Path:
+    value = os.environ.get("GSTACK_BRIDGE_STATE_FILE", "").strip()
+    return Path(value).expanduser() if value else DEFAULT_STATE_FILE
+
+
+def bridge_tmux_session() -> str:
+    value = os.environ.get("GSTACK_BRIDGE_SESSION", "").strip()
+    return value or DEFAULT_TMUX_SESSION
+
+
+def bridge_server_log() -> Path:
+    value = os.environ.get("GSTACK_BRIDGE_SERVER_LOG", "").strip()
+    return Path(value).expanduser() if value else DEFAULT_SERVER_LOG
+
+
 def tmux_session_exists() -> bool:
     result = subprocess.run(
-        ["tmux", "has-session", "-t", TMUX_SESSION],
+        ["tmux", "has-session", "-t", bridge_tmux_session()],
         text=True,
         capture_output=True,
         check=False,
@@ -47,10 +63,11 @@ def tmux_session_exists() -> bool:
 
 
 def load_state() -> dict[str, Any] | None:
-    if not STATE_FILE.exists():
+    state_file = bridge_state_file()
+    if not state_file.exists():
         return None
     try:
-        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        return json.loads(state_file.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return None
 
@@ -68,6 +85,9 @@ def server_health(state: dict[str, Any], timeout: float = 2.0) -> dict[str, Any]
 
 def ensure_tmux_server(timeout: float = 15.0) -> dict[str, Any]:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
+    state_file = bridge_state_file()
+    server_log = bridge_server_log()
+    tmux_session = bridge_tmux_session()
 
     existing = load_state()
     if existing:
@@ -76,19 +96,19 @@ def ensure_tmux_server(timeout: float = 15.0) -> dict[str, Any]:
             return existing
 
     if tmux_session_exists():
-        subprocess.run(["tmux", "kill-session", "-t", TMUX_SESSION], check=False)
+        subprocess.run(["tmux", "kill-session", "-t", tmux_session], check=False)
         time.sleep(0.2)
 
     command = (
         f"cd {shell_quote(str(PROJECT_ROOT))} && "
         f"mkdir -p {shell_quote(str(STATE_DIR))} && "
-        f"env BROWSE_STATE_FILE={shell_quote(str(STATE_FILE))} "
+        f"env BROWSE_STATE_FILE={shell_quote(str(state_file))} "
         f"{shell_quote(str(Path.home() / '.bun' / 'bin' / 'bun'))} run "
         f"{shell_quote(str(GSTACK_ROOT / 'browse' / 'src' / 'server.ts'))} "
-        f">> {shell_quote(str(DEFAULT_SERVER_LOG))} 2>&1"
+        f">> {shell_quote(str(server_log))} 2>&1"
     )
     result = subprocess.run(
-        ["tmux", "new-session", "-d", "-s", TMUX_SESSION, command],
+        ["tmux", "new-session", "-d", "-s", tmux_session, command],
         text=True,
         capture_output=True,
         check=False,
@@ -107,8 +127,8 @@ def ensure_tmux_server(timeout: float = 15.0) -> dict[str, Any]:
         time.sleep(0.2)
 
     log_tail = ""
-    if DEFAULT_SERVER_LOG.exists():
-        log_tail = DEFAULT_SERVER_LOG.read_text(encoding="utf-8", errors="ignore")[-2000:]
+    if server_log.exists():
+        log_tail = server_log.read_text(encoding="utf-8", errors="ignore")[-2000:]
     raise BridgeError(f"Timed out waiting for gstack browse server.\n{log_tail}".strip())
 
 
@@ -138,11 +158,13 @@ def send_command(command: str, args: list[str], *, timeout: float = 30.0) -> str
 
 
 def command_ensure_server(_: argparse.Namespace) -> int:
+    tmux_session = bridge_tmux_session()
+    state_file = bridge_state_file()
     state = ensure_tmux_server()
     payload = {
         "ok": True,
-        "tmux_session": TMUX_SESSION,
-        "state_file": str(STATE_FILE),
+        "tmux_session": tmux_session,
+        "state_file": str(state_file),
         "server": state,
         "health": server_health(state),
     }
@@ -151,13 +173,16 @@ def command_ensure_server(_: argparse.Namespace) -> int:
 
 
 def command_status(_: argparse.Namespace) -> int:
+    tmux_session = bridge_tmux_session()
+    state_file = bridge_state_file()
     state = load_state()
     payload = {
         "tmux_session_exists": tmux_session_exists(),
-        "state_file": str(STATE_FILE),
+        "state_file": str(state_file),
         "state_exists": bool(state),
         "state": state or {},
         "health": server_health(state) if state else None,
+        "tmux_session": tmux_session,
     }
     print_json(payload)
     return 0
@@ -175,9 +200,10 @@ def command_cmd(args: argparse.Namespace) -> int:
 
 
 def command_kill(_: argparse.Namespace) -> int:
+    tmux_session = bridge_tmux_session()
     if tmux_session_exists():
-        subprocess.run(["tmux", "kill-session", "-t", TMUX_SESSION], check=False)
-    print_json({"ok": True, "tmux_session": TMUX_SESSION, "killed": True})
+        subprocess.run(["tmux", "kill-session", "-t", tmux_session], check=False)
+    print_json({"ok": True, "tmux_session": tmux_session, "killed": True})
     return 0
 
 
