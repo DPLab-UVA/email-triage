@@ -108,8 +108,8 @@ def open_compose_tab(platform: str) -> AtlasTab:
     return tab
 
 
-def ensure_compose_tab(platform: str) -> AtlasTab:
-    tab = newest_compose_tab(platform)
+def ensure_compose_tab(platform: str, *, fresh: bool = False) -> AtlasTab:
+    tab = None if fresh else newest_compose_tab(platform)
     if tab is None:
         tab = open_compose_tab(platform)
     else:
@@ -160,7 +160,9 @@ end tell
             raise AtlasSocialError(result.stderr.strip() or "Failed to paste into Atlas")
         echoed = read_clipboard()
         return {
-            "ok": echoed == text,
+            "ok": echoed == text or text in echoed,
+            "exact_match": echoed == text,
+            "contained_match": text in echoed,
             "echoed_text": echoed,
             "expected_text": text,
         }
@@ -200,7 +202,7 @@ def command_tabs(args: argparse.Namespace) -> int:
 
 
 def command_open_compose(args: argparse.Namespace) -> int:
-    tab = open_compose_tab(args.platform)
+    tab = ensure_compose_tab(args.platform, fresh=args.fresh)
     payload = {
         "action": "open-compose",
         "platform": args.platform,
@@ -210,7 +212,7 @@ def command_open_compose(args: argparse.Namespace) -> int:
 
 
 def command_focus_compose(args: argparse.Namespace) -> int:
-    tab = ensure_compose_tab(args.platform)
+    tab = ensure_compose_tab(args.platform, fresh=args.fresh)
     payload = {
         "action": "focus-compose",
         "platform": args.platform,
@@ -220,12 +222,7 @@ def command_focus_compose(args: argparse.Namespace) -> int:
 
 
 def command_draft(args: argparse.Namespace) -> int:
-    if args.platform == "xiaohongshu":
-        tab = ensure_compose_tab(args.platform)
-        if logged_out(tab):
-            raise AtlasSocialError("Xiaohongshu creator page is not logged in inside Atlas yet.")
-        raise AtlasSocialError("Xiaohongshu draft injection is not implemented yet.")
-    tab = ensure_compose_tab(args.platform)
+    tab = ensure_compose_tab(args.platform, fresh=args.fresh)
     if logged_out(tab):
         raise AtlasSocialError(f"{args.platform} compose tab is not logged in inside Atlas.")
     result = paste_and_verify(args.text)
@@ -249,17 +246,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     open_parser = subparsers.add_parser("open-compose", help="Open a social compose tab in Atlas.")
     open_parser.add_argument("platform", choices=sorted(PLATFORM_URLS))
+    open_parser.add_argument("--fresh", action="store_true")
     open_parser.add_argument("--json", action="store_true")
     open_parser.set_defaults(func=command_open_compose)
 
     focus_parser = subparsers.add_parser("focus-compose", help="Focus the newest social compose tab in Atlas.")
     focus_parser.add_argument("platform", choices=sorted(PLATFORM_URLS))
+    focus_parser.add_argument("--fresh", action="store_true")
     focus_parser.add_argument("--json", action="store_true")
     focus_parser.set_defaults(func=command_focus_compose)
 
     draft_parser = subparsers.add_parser("draft", help="Write a draft into an Atlas social compose tab.")
     draft_parser.add_argument("platform", choices=sorted(PLATFORM_URLS))
     draft_parser.add_argument("--text", required=True)
+    draft_parser.add_argument("--fresh", action="store_true")
     draft_parser.add_argument("--json", action="store_true")
     draft_parser.set_defaults(func=command_draft)
 
