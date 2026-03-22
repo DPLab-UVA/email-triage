@@ -118,6 +118,7 @@ def register_pending_message(state_path: Path, row: dict[str, Any], *, moved_at:
         "received_at": row.get("received_at", ""),
         "moved_at": moved_at or now_iso(),
         "last_seen_folder": "Night Review",
+        "missing_cycles": 0,
     }
     pending[key] = record
     state["pending"] = pending
@@ -150,6 +151,7 @@ def bootstrap_pending_messages(
             "received_at": row.get("received_at", ""),
             "moved_at": pending.get(key, {}).get("moved_at", stamp),
             "last_seen_folder": folder_name,
+            "missing_cycles": 0,
         }
         if key in pending:
             updated += 1
@@ -351,9 +353,18 @@ def process_cycle(
     rows_by_key = {message_key(row): row for row in rows}
 
     removed_missing: list[dict[str, Any]] = []
+    newly_missing: list[dict[str, Any]] = []
     for key in list(pending):
-        if key not in rows_by_key:
+        if key in rows_by_key:
+            pending[key]["missing_cycles"] = 0
+            continue
+        record = pending[key]
+        misses = int(record.get("missing_cycles", 0)) + 1
+        record["missing_cycles"] = misses
+        if misses >= 3:
             removed_missing.append(pending.pop(key))
+        else:
+            newly_missing.append(record)
     if removed_missing:
         summary["removed_missing"] = len(removed_missing)
         append_jsonl(
@@ -364,6 +375,17 @@ def process_cycle(
                 "status": "removed-missing",
                 "count": len(removed_missing),
                 "subjects": [row.get("subject", "") for row in removed_missing[:5]],
+            },
+        )
+    if newly_missing:
+        append_jsonl(
+            event_log,
+            {
+                "timestamp": now.isoformat(),
+                "action": "sync-pending",
+                "status": "missing-once",
+                "count": len(newly_missing),
+                "subjects": [row.get("subject", "") for row in newly_missing[:5]],
             },
         )
 

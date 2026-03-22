@@ -47,6 +47,34 @@
       "reason": "Explicit required-action subjects should notify."
     },
     {
+      "subject_contains": "Budget Clarification Request",
+      "reason": "Budget clarification threads are actionable and important."
+    },
+    {
+      "subject_contains": "Question about jaguar04 and sds01",
+      "reason": "Infrastructure issues on jaguar04 and sds01 are important."
+    },
+    {
+      "subject_contains": "implementing the PrivSyn prototype on UVA Research Computing infrastructure",
+      "reason": "PrivSyn research computing coordination is important."
+    },
+    {
+      "subject_contains": "reimbursement",
+      "reason": "Reimbursement threads are important."
+    },
+    {
+      "subject_contains": "Speaker on Apr 2nd",
+      "reason": "This speaker thread is important."
+    },
+    {
+      "subject_contains": "Postdoctoral Fellow Position",
+      "reason": "Postdoc hiring threads are important."
+    },
+    {
+      "subject_contains": "NVIDIA Research",
+      "reason": "NVIDIA Research threads are important."
+    },
+    {
       "sender_contains": "HotCRP",
       "subject_contains": "Comment for #",
       "reason": "HotCRP comment notifications are usually actionable."
@@ -97,14 +125,6 @@
     {
       "subject_contains": "Funding Opportunity",
       "reason": "Funding-opportunity broadcasts should usually go to the nightly digest."
-    },
-    {
-      "subject_contains": "seminar",
-      "reason": "Seminar and talk announcements should usually go to the nightly digest."
-    },
-    {
-      "subject_contains": "talk",
-      "reason": "Talk announcements should usually go to the nightly digest."
     }
   ],
   "important_senders": [

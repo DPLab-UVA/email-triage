@@ -487,7 +487,30 @@ def move_message_to_folder(row: dict[str, Any], folder_name: str) -> dict[str, A
 
     chosen = select_folder_in_dialog(folder_name)
     if not chosen.get("ok"):
-        return {"ok": False, "step": "select_folder_in_dialog", "detail": chosen}
+        if chosen.get("reason") == "move-dialog-not-found":
+            dismiss_move_dialog()
+            time.sleep(0.2)
+            reopened = open_move_picker(folder_name)
+            if reopened.get("ok") and reopened.get("stage") == "direct-menu-folder":
+                clicked_folder = click_menu_folder(folder_name)
+                if not clicked_folder.get("ok"):
+                    return {"ok": False, "step": "click_menu_folder", "detail": clicked_folder}
+                time.sleep(0.8)
+                still_visible = any(str(row.get("subject", "")) in text for text in visible_subjects())
+                return {
+                    "ok": not still_visible,
+                    "step": "move-direct-retry",
+                    "detail": {
+                        "selection": selection,
+                        "opened": reopened,
+                        "clicked_folder": clicked_folder,
+                        "still_visible": still_visible,
+                    },
+                }
+            if reopened.get("ok"):
+                chosen = select_folder_in_dialog(folder_name)
+        if not chosen.get("ok"):
+            return {"ok": False, "step": "select_folder_in_dialog", "detail": chosen}
 
     enabled = bool(chosen.get("move_enabled"))
     if not enabled:
