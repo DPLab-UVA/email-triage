@@ -69,6 +69,28 @@ def keyword_matches(keywords: list[str], haystack: str) -> list[str]:
     return [keyword for keyword in keywords if keyword.lower() in lower_haystack]
 
 
+def is_automated_sender(sender: str) -> bool:
+    value = normalize_text(sender).lower()
+    hints = [
+        "noreply",
+        "no-reply",
+        "do-not-reply",
+        "notification",
+        "notifications",
+        "editorial",
+        "newsletter",
+        "helpdesk",
+        "hotcrp",
+        "microsoft cmt",
+        "google flights",
+        "google scholar",
+        "survey monkey",
+        "surveymonkey",
+        "bookstores",
+    ]
+    return any(token in value for token in hints)
+
+
 def override_matches(override: dict[str, Any], *, sender: str, sender_addr: str, subject: str, body: str) -> bool:
     sender_text = normalize_text(sender).lower()
     sender_addr_text = normalize_text(sender_addr).lower()
@@ -98,6 +120,58 @@ def similarity_score(message_text: str, example: dict[str, Any]) -> float:
 
 def infer_category(subject: str, body: str) -> str:
     text = f"{subject}\n{body}".lower()
+    if any(
+        token in text
+        for token in [
+            "reimbursement",
+            "budget clarification",
+            "travel reimbursement",
+            "expense report",
+            "award budget",
+        ]
+    ):
+        return "finance_admin"
+    if any(
+        token in text
+        for token in [
+            "postdoctoral",
+            "postdoc",
+            "candidate",
+            "research posting",
+            "screen candidates",
+            "hire",
+            "hiring",
+            "intake meeting",
+        ]
+    ):
+        return "hiring"
+    if any(
+        token in text
+        for token in [
+            "jaguar04",
+            "sds01",
+            "research computing",
+            "rc operations",
+            "infrastructure",
+            "prototype",
+            "repair",
+        ]
+    ):
+        return "infrastructure"
+    if "speaker" in text and any(token in text for token in ["availability", "logistics", "apr ", "invite", "invitation", "confirm"]):
+        return "speaker_logistics"
+    if any(
+        token in text
+        for token in [
+            "nvidia research",
+            "project plan",
+            "next steps",
+            "follow-up on",
+            "follow up on",
+            "project",
+        ]
+    ):
+        return "collaboration"
     if any(token in text for token in ["invitation to review", "review invitation", "invited to review", "would you review"]) and any(
         token in text for token in ["journal", "manuscript", "editor", "associate editor", "referee"]
     ):
@@ -190,6 +264,7 @@ def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: lis
     sender_addr = sender_email(sender)
     sender_domain = domain_of(sender_addr)
     full_text = f"{subject}\n{body}"
+    human_sender = not is_automated_sender(sender)
 
     for override in rules.get("force_not_important", []):
         if override_matches(override, sender=sender, sender_addr=sender_addr, subject=subject, body=body):
@@ -278,6 +353,25 @@ def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: lis
     if category in {"deadline", "request", "scheduling", "ticket", "review", "security"}:
         score += 1
         reasons.append(f"action-oriented category: {category}")
+    if category == "infrastructure":
+        score += 2.5
+        reasons.append("high-signal category: infrastructure")
+    if human_sender and category in {"finance_admin", "hiring", "infrastructure", "speaker_logistics", "collaboration"}:
+        score += 2.5
+        reasons.append(f"human-thread category: {category}")
+    actionable_hints = [
+        "can you",
+        "could you",
+        "please",
+        "let me know",
+        "confirm",
+        "next steps",
+        "follow-up",
+        "follow up",
+    ]
+    if human_sender and any(token in full_text.lower() for token in actionable_hints):
+        score += 1.5
+        reasons.append("human thread with explicit follow-up signal")
     if category == "bulk":
         score -= 2
         reasons.append("bulk-style content")
