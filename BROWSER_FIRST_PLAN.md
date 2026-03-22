@@ -125,3 +125,33 @@ Build one local workflow that can:
 - Webmail DOM can drift, so selectors must be robust.
 - Send-tracking must avoid false positives when the user discards or rewrites heavily.
 - Night Review restore is driven by Outlook's read/unread state, so if a message stays unread it will remain queued instead of being restored.
+
+## Operational Rules Learned (2026-03-22)
+
+- Do not run parallel actions against the same live Outlook page.
+  Serial page operations are slower, but much more reliable.
+- Stop the live monitor before any manual thread inspection or manual drafting.
+  Otherwise the monitor can navigate the page away from the thread or draft being inspected.
+- Prefer visible-list scrolling over Outlook Web search for deep thread retrieval.
+  Search is currently less reliable than scrolling and matching stable subjects.
+- Treat Outlook `dom_id` values as short-lived.
+  Re-find the row in the current visible list before clicking; do not assume an old `dom_id` will still work after scrolling or folder changes.
+- Distinguish three states, not two:
+  `important + needs_notify`, `important + needs_reply`, and `not_important`.
+  Important automatic mail should notify if useful, but should not generate a reply draft.
+- Never auto-draft replies for automated, system, or mass-mail messages.
+  This includes alerts, newsletters, conference system mail, flight trackers, scholar updates, generic invitations, and other no-reply style traffic.
+- Do not overfit triage rules to exact subjects.
+  Rules should encode broad principles, while per-message judgment should come from Codex using the actual thread text.
+- For HR / hiring / administrative tasks, inspect `Sent Items` as well as `Inbox`.
+  The actionable context often lives in sent threads rather than new inbound mail.
+- For document-heavy tasks, generate the artifact locally first, then return to the live browser only for the final reply step.
+  This keeps browser automation focused on the narrow part it is good at.
+- Do not rely on selected-row state after a reply box is already open.
+  If the compose box is visible, inspect the compose DOM directly instead of assuming the message list still exposes a selected row.
+- Keep long-running dependencies out of the repo when possible.
+  Temporary tool installs, like `docx`, should live in a disposable location instead of polluting the project tree.
+- Pinned messages are effectively user overrides.
+  They should never be auto-moved or treated as disposable low-priority mail.
+- Night Review state should tolerate transient visibility misses.
+  One missed scan is not enough evidence that a message disappeared.
