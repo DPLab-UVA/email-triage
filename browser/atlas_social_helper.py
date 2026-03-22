@@ -131,22 +131,71 @@ def osascript(script: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(["osascript", "-e", script], text=True, capture_output=True, check=False)
 
 
-def activate_atlas() -> None:
+def atlas_front_state() -> dict[str, str]:
     script = """
-tell application "ChatGPT Atlas" to activate
+tell application "System Events"
+  set frontProc to first application process whose frontmost is true
+  set frontName to name of frontProc
+  try
+    set win1 to front window of frontProc
+    set titleText to name of win1
+  on error
+    set titleText to ""
+  end try
+end tell
+return frontName & "\\n" & titleText
+""".strip()
+    result = osascript(script)
+    if result.returncode != 0:
+        raise AtlasSocialError(result.stderr.strip() or "Failed to inspect frontmost app")
+    lines = (result.stdout or "").splitlines()
+    return {
+        "app_name": lines[0].strip() if lines else "",
+        "window_title": lines[1].strip() if len(lines) > 1 else "",
+    }
+
+
+def activate_atlas() -> dict[str, str]:
+    script = """
+tell application id "com.openai.atlas" to activate
+delay 0.8
+tell application "System Events"
+  tell process "ChatGPT Atlas"
+    set frontmost to true
+  end tell
+end tell
+delay 0.2
+tell application "System Events"
+  set frontProc to first application process whose frontmost is true
+  set frontName to name of frontProc
+  try
+    set win1 to front window of frontProc
+    set titleText to name of win1
+  on error
+    set titleText to ""
+  end try
+end tell
+return frontName & "\\n" & titleText
 """.strip()
     result = osascript(script)
     if result.returncode != 0:
         raise AtlasSocialError(result.stderr.strip() or "Failed to activate Atlas")
+    lines = (result.stdout or "").splitlines()
+    state = {
+        "app_name": lines[0].strip() if lines else "",
+        "window_title": lines[1].strip() if len(lines) > 1 else "",
+    }
+    if state["app_name"] != "ChatGPT Atlas":
+        raise AtlasSocialError(f"Atlas did not become frontmost. Front app is '{state['app_name']}'.")
+    return state
 
 
 def paste_and_verify(text: str) -> dict[str, Any]:
     original_clipboard = read_clipboard()
     try:
         write_clipboard(text)
+        before = activate_atlas()
         script = """
-tell application "ChatGPT Atlas" to activate
-delay 0.6
 tell application "System Events"
   keystroke "v" using command down
   delay 0.4
@@ -159,12 +208,15 @@ end tell
         if result.returncode != 0:
             raise AtlasSocialError(result.stderr.strip() or "Failed to paste into Atlas")
         echoed = read_clipboard()
+        after = atlas_front_state()
         return {
             "ok": echoed == text or text in echoed,
             "exact_match": echoed == text,
             "contained_match": text in echoed,
             "echoed_text": echoed,
             "expected_text": text,
+            "front_state_before": before,
+            "front_state_after": after,
         }
     finally:
         write_clipboard(original_clipboard)
