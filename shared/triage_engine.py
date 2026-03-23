@@ -124,6 +124,7 @@ def is_automated_sender(sender: str) -> bool:
         "survey monkey",
         "surveymonkey",
         "bookstores",
+        "workday",
     ]
     return any(token in value for token in hints)
 
@@ -157,6 +158,12 @@ def similarity_score(message_text: str, example: dict[str, Any]) -> float:
 
 def infer_category(subject: str, body: str) -> str:
     text = f"{subject}\n{body}".lower()
+    if (
+        "expense report" in text
+        and "submitted on your behalf" in text
+        and "has been approved" not in text
+    ):
+        return "expense_approval"
     if any(
         token in text
         for token in [
@@ -538,6 +545,19 @@ def heuristic_triage(message: dict[str, Any], rules: dict[str, Any], examples: l
             "reasons": ["publication invitation should be auto-declined for this user"],
             "message": message_metadata(message),
             "draft_reply": build_draft(message, rules, category),
+            "decision_source": "rule",
+        }
+    if category == "expense_approval":
+        return {
+            "important": True,
+            "score": 90.0,
+            "threshold": float(rules.get("priority_threshold", 4)),
+            "action": "queue-auto-approve-expense",
+            "category": category,
+            "reasons": ["expense reports submitted on the user's behalf should be approved promptly"],
+            "message": message_metadata(message),
+            "draft_reply": "",
+            "human_sender": False,
             "decision_source": "rule",
         }
     if category in {"deadline", "request", "scheduling", "ticket", "review", "security"}:

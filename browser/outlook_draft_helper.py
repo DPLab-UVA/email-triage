@@ -618,6 +618,7 @@ def looks_automated_message(message: dict[str, Any]) -> bool:
 
 def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
     category = str(triage.get("category", "")).strip().lower()
+    action = str(triage.get("action", "")).strip().lower()
     subject = str(message.get("subject", "")).strip().lower()
     sender = str(message.get("from", "")).strip()
     body = message_body_for_model(message).lower()
@@ -655,6 +656,8 @@ def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
         ]
     )
     if not triage.get("important"):
+        return False
+    if action.startswith("queue-auto-approve") or category == "expense_approval":
         return False
     if "needs_reply" in llm_judgment and not bool(llm_judgment.get("needs_reply")):
         return False

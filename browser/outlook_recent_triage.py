@@ -226,7 +226,7 @@ def triage_recent_messages(
         elif triage.get("action") == "notify-and-draft":
             bucket = "important_notify"
             useful = True
-        elif str(triage.get("action", "")).startswith("queue-auto-decline"):
+        elif str(triage.get("action", "")).startswith(("queue-auto-decline", "queue-auto-approve")):
             bucket = "auto_action"
             useful = False
         else:
@@ -241,7 +241,9 @@ def triage_recent_messages(
             **row,
             "useful": useful,
             "bucket": bucket,
-            "target_folder": digest_folder if bucket in {"night_digest", "auto_action"} else "",
+            "target_folder": digest_folder
+            if (bucket == "night_digest" or (bucket == "auto_action" and str(triage.get("action", "")) != "queue-auto-approve-expense"))
+            else "",
             "reason": reason,
             "triage": triage,
         }

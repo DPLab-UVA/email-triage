@@ -19,6 +19,7 @@ from outlook_apply_triage import (
     move_message_to_folder,
     select_visible_message,
 )
+from outlook_auto_actions import attempt_expense_approval_from_selected
 from outlook_draft_helper import (
     DEFAULT_FEEDBACK,
     DEFAULT_STYLE_PROFILE,
@@ -311,6 +312,32 @@ def run_cycle(
                 event["status"] = "max-retries-exhausted"
                 event["attempt"] = attempt
                 mark_seen(state, key, max_seen=max_seen)
+            elif str(row.get("triage", {}).get("action", "")) == "queue-auto-approve-expense":
+                selection = select_visible_message(
+                    str(row.get("dom_id", "")),
+                    str(row.get("subject", "")),
+                )
+                event["action"] = "auto-approve-expense"
+                event["selection_for_auto_action"] = selection
+                if not selection.get("ok"):
+                    event["status"] = "select-failed"
+                    event["attempt"] = increment_attempt(state, key)
+                    payload["move_failures"] += 1
+                else:
+                    result = attempt_expense_approval_from_selected()
+                    event["result"] = result
+                    if result.get("ok"):
+                        event["status"] = "approved"
+                        mark_seen(state, key, max_seen=max_seen)
+                        clear_attempt(state, key)
+                    elif result.get("opened"):
+                        event["status"] = str(result.get("status") or "opened-manual-followup")
+                        mark_seen(state, key, max_seen=max_seen)
+                        clear_attempt(state, key)
+                    else:
+                        event["status"] = str(result.get("status") or "approve-failed")
+                        event["attempt"] = increment_attempt(state, key)
+                        payload["move_failures"] += 1
             else:
                 result = move_message_to_folder(row, folder_name, mark_read_before_move=True)
                 event["action"] = "queue-auto-action" if row.get("bucket") == "auto_action" else "move-to-night-review"
