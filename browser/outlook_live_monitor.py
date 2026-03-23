@@ -45,6 +45,7 @@ from outlook_recent_triage import (
     message_cursor_key,
     top_cursor_keys,
     triage_recent_messages,
+    wait_for_visible_options,
 )
 from outlook_reply_style import DEFAULT_SAMPLES as DEFAULT_STYLE_SAMPLES, refresh_style_profile
 from outlook_web_workflow import (
@@ -220,9 +221,15 @@ def run_cycle(
     opened = open_folder(source_folder)
     if not opened.get("ok"):
         raise BridgeError(f"Could not open Outlook folder {source_folder}: {opened}")
+    wait_for_visible_options(recent_only=not include_pinned)
 
     state = load_state(state_path)
-    stop_keys = set(state.get("scan_cursor_keys", [])) if state.get("initialized") else set()
+    seen = set(state.get("seen_keys", []))
+    stop_keys = (
+        {key for key in state.get("scan_cursor_keys", []) if key in seen}
+        if state.get("initialized")
+        else set()
+    )
     rows = fetch_recent_messages(
         screens=scan_screens,
         max_screens=max_scan_screens,
@@ -232,8 +239,10 @@ def run_cycle(
     )
     triaged, summary = triage_recent_messages(rows, rules=rules, examples=examples)
     style_profile = load_style_profile(DEFAULT_STYLE_PROFILE)
-    seen = set(state.get("seen_keys", []))
-    state["scan_cursor_keys"] = top_cursor_keys(limit=cursor_window, recent_only=not include_pinned)
+    next_cursor_keys = top_cursor_keys(limit=cursor_window, recent_only=not include_pinned)
+    unseen_cursor_keys = [key for key in next_cursor_keys if key not in seen]
+    if triaged or not unseen_cursor_keys or not state.get("initialized"):
+        state["scan_cursor_keys"] = next_cursor_keys
     folder_name = str(summary.get("nightly_digest_folder", "Night Review"))
     reminder_hour = int(rules.get("nightly_digest_hour_local", 21))
     restore_hour = int(rules.get("night_review_restore_hour_local", 7))
@@ -257,6 +266,14 @@ def run_cycle(
         "night_review_restore_folder": restore_folder,
         "events": [],
     }
+    if not triaged and unseen_cursor_keys and state.get("initialized"):
+        payload["events"].append(
+            {
+                "type": "cursor-hold",
+                "reason": "visible-unseen-rows-with-empty-fetch",
+                "count": len(unseen_cursor_keys),
+            }
+        )
 
     if not folder_exists(folder_name):
         raise BridgeError(f"Outlook folder not found: {folder_name}")
@@ -339,6 +356,63 @@ def run_cycle(
                 event["status"] = "max-retries-exhausted"
                 event["attempt"] = attempt
                 mark_seen(state, key, max_seen=max_seen)
+            elif row.get("bucket") == "night_digest":
+                selection = select_visible_message(
+                    str(row.get("dom_id", "")),
+                    str(row.get("subject", "")),
+                    sender=str(row.get("from", "")),
+                    received_at=str(row.get("received_at", "")),
+                    conversation_id=str(row.get("conversation_id", "")),
+                )
+                event["selection_for_recheck"] = selection
+                if selection.get("ok"):
+                    try:
+                        full_message = selected_message_payload()
+                        full_triage = classify_message_payload(full_message, rules, examples, style_profile=style_profile)
+                        event["full_triage"] = {
+                            "important": bool(full_triage.get("important")),
+                            "category": full_triage.get("category", ""),
+                            "action": full_triage.get("action", ""),
+                            "reasons": full_triage.get("reasons", []),
+                            "llm_judgment": full_triage.get("llm_judgment", {}),
+                        }
+                        if full_triage.get("important"):
+                            event["action"] = "notify-after-recheck"
+                            if str(full_triage.get("draft_reply", "")).strip():
+                                event["outlook_draft"] = open_outlook_reply_draft(full_message, full_triage)
+                            else:
+                                event["outlook_draft"] = {
+                                    "ok": False,
+                                    "reason": "no-draft-reply-after-full-thread-parse",
+                                }
+                            event["status"] = "logged" if not notify else ("notified" if notify_user(full_message, str(full_triage.get("reasons", [""])[-1])) else "notify-failed")
+                            if event["status"] == "notified":
+                                payload["important_notified"] += 1
+                            mark_seen(state, key, max_seen=max_seen)
+                            clear_attempt(state, key)
+                            payload["events"].append(event)
+                            append_jsonl(event_log, event)
+                            seen = set(state.get("seen_keys", []))
+                            continue
+                    except Exception as exc:
+                        event["recheck_error"] = str(exc)
+                result = move_message_to_folder(row, folder_name, mark_read_before_move=True)
+                event["action"] = "move-to-night-review"
+                event["result"] = result
+                if result.get("ok"):
+                    event["status"] = "moved"
+                    event["night_review_record"] = register_pending_message(
+                        night_review_state_path,
+                        row,
+                        moved_at=event["timestamp"],
+                    )
+                    payload["night_moved"] += 1
+                    mark_seen(state, key, max_seen=max_seen)
+                    clear_attempt(state, key)
+                else:
+                    event["status"] = "move-failed"
+                    event["attempt"] = increment_attempt(state, key)
+                    payload["move_failures"] += 1
             elif str(row.get("triage", {}).get("action", "")) == "queue-auto-approve-expense":
                 selection = select_visible_message(
                     str(row.get("dom_id", "")),

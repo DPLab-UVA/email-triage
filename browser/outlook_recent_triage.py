@@ -186,6 +186,25 @@ def reset_message_list_scroll() -> None:
     bridge_js(expr, timeout=10.0)
 
 
+def wait_for_visible_options(*, recent_only: bool, timeout_seconds: float = 6.0, poll_seconds: float = 0.25) -> list[dict[str, Any]]:
+    deadline = time.time() + max(0.5, timeout_seconds)
+    last_rows: list[dict[str, Any]] = []
+    while time.time() < deadline:
+        parsed_rows: list[dict[str, Any]] = []
+        for row in current_visible_options():
+            parsed = parse_option(row)
+            if not parsed:
+                continue
+            if recent_only and not parsed.get("received_at"):
+                continue
+            parsed_rows.append(parsed)
+        if parsed_rows:
+            return parsed_rows
+        last_rows = parsed_rows
+        time.sleep(max(0.05, poll_seconds))
+    return last_rows
+
+
 def top_cursor_keys(*, limit: int, recent_only: bool) -> list[str]:
     keys: list[str] = []
     seen: set[str] = set()
@@ -219,14 +238,20 @@ def fetch_recent_messages(
     stop_keys = {key for key in (stop_keys or set()) if key}
     screen_cap = max(1, int(max_screens or screens))
     stop_hit = False
+    primed_rows = wait_for_visible_options(recent_only=recent_only)
 
-    for _ in range(screen_cap):
-        for row in current_visible_options():
-            parsed = parse_option(row)
-            if not parsed:
-                continue
-            if recent_only and not parsed.get("received_at"):
-                continue
+    for index in range(screen_cap):
+        row_source = primed_rows if index == 0 and primed_rows else []
+        if not row_source:
+            row_source = []
+            for row in current_visible_options():
+                parsed = parse_option(row)
+                if not parsed:
+                    continue
+                if recent_only and not parsed.get("received_at"):
+                    continue
+                row_source.append(parsed)
+        for parsed in row_source:
             key = str(parsed.get("cursor_key", "")).strip()
             if stop_keys and key in stop_keys:
                 stop_hit = True
