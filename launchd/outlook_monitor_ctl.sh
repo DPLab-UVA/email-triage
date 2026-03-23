@@ -2,7 +2,8 @@
 set -euo pipefail
 
 LABEL="com.emailtriage.outlook-monitor"
-SOURCE_PLIST="/Users/tianhao/Downloads/email-triage-lab/launchd/com.emailtriage.outlook-monitor.plist"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SOURCE_PLIST="$ROOT/launchd/com.emailtriage.outlook-monitor.plist"
 DEST_PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 

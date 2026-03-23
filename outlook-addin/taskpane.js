@@ -1,4 +1,4 @@
-const STORAGE_KEY = "email-triage-lab.policy.v1";
+const STORAGE_KEY = "email-triage.policy.v1";
 const DEFAULT_POLICY_URL = "./config/triage-policy.json";
 
 const state = {

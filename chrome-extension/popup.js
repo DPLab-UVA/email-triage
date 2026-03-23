@@ -79,7 +79,7 @@ async function exportReport(report) {
   if (!report) {
     throw new Error("Capture a message first, then export it.");
   }
-  const fileName = `email-triage-lab/outlook-capture-${new Date().toISOString().replaceAll(":", "-")}.json`;
+  const fileName = `email-triage/outlook-capture-${new Date().toISOString().replaceAll(":", "-")}.json`;
   const blob = new Blob([pretty(report)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   try {

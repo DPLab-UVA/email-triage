@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SESSION="email-triage-monitor"
-ROOT="/Users/tianhao/Downloads/email-triage-lab"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CMD="/opt/homebrew/bin/python3 $ROOT/browser/outlook_live_monitor.py watch --include-pinned --interval 30 >> $ROOT/shared/outlook_monitor.stdout.log 2>> $ROOT/shared/outlook_monitor.stderr.log"
 
 case "${1:-}" in

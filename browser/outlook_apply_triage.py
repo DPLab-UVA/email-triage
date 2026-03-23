@@ -27,7 +27,7 @@ from outlook_web_workflow import (
     ensure_outlook_session,
 )
 
-ROOT = Path("/Users/tianhao/Downloads/email-triage-lab")
+ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ACTION_LOG = SHARED / "outlook_move_actions.jsonl"
 
 

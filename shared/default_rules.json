@@ -8,7 +8,7 @@
     "provider": "codex",
     "model": "gpt-5.4-mini",
     "timeout_seconds": 90,
-    "cache_path": "/Users/tianhao/Downloads/email-triage-lab/shared/triage_llm_cache.json",
+    "cache_path": "/Users/tianhao/Downloads/email-triage/shared/triage_llm_cache.json",
     "max_body_chars": 5000
   },
   "llm_drafts": {

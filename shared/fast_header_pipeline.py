@@ -10,7 +10,7 @@ from pathlib import Path
 
 from triage_engine import load_json, load_jsonl, triage_message
 
-ROOT = Path("/Users/tianhao/Downloads/email-triage-lab")
+ROOT = Path(__file__).resolve().parents[1]
 SHARED = ROOT / "shared"
 
 

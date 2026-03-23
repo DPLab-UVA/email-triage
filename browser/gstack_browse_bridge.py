@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path("/Users/tianhao/Downloads/email-triage-lab")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GSTACK_ROOT = Path("/Users/tianhao/gstack")
 STATE_DIR = PROJECT_ROOT / ".gstack"
 DEFAULT_STATE_FILE = STATE_DIR / "bridge-browse.json"

@@ -18,7 +18,7 @@ const {
   LevelFormat,
 } = require("/tmp/email-triage-docx-tools/node_modules/docx");
 
-const root = "/Users/tianhao/Downloads/email-triage-lab/docs/postdoc-hiring";
+const root = "/Users/tianhao/Downloads/email-triage/docs/postdoc-hiring";
 const out = path.join(root, "Postdoc_Hiring_Documentation_Packet.docx");
 
 const border = { style: BorderStyle.SINGLE, size: 1, color: "CFCFCF" };

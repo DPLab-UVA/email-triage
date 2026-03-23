@@ -14,7 +14,7 @@ from typing import Any
 
 from gstack_browse_bridge import BridgeError, ensure_tmux_server, send_command
 
-ROOT = Path("/Users/tianhao/Downloads/email-triage-lab")
+ROOT = Path(__file__).resolve().parents[1]
 STATE_DIR = ROOT / ".gstack"
 DEFAULT_BROWSER = "Chrome"
 DEFAULT_PROFILE = "Profile 1"

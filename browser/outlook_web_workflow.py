@@ -23,7 +23,7 @@ DEFAULT_COOKIE_DOMAINS = [
     ".office.com",
     ".microsoft.com",
 ]
-DEFAULT_CAPTURE_DIR = Path("/Users/tianhao/Downloads/email-triage-lab/shared/outlook-browser-captures")
+DEFAULT_CAPTURE_DIR = Path(__file__).resolve().parents[1] / "shared" / "outlook-browser-captures"
 
 
 def bridge_cmd(command: str, *args: str, timeout: float = 30.0) -> str:

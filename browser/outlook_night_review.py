@@ -457,6 +457,78 @@ def process_cycle(
     return summary
 
 
+def restore_now(
+    *,
+    state_path: Path,
+    event_log: Path,
+    folder_name: str,
+    restore_folder: str,
+    screens: int,
+    limit: int,
+    pending_only: bool,
+    only_read: bool,
+) -> dict[str, Any]:
+    if not folder_exists(folder_name):
+        raise BridgeError(f"Outlook folder not found: {folder_name}")
+    if not folder_exists(restore_folder):
+        raise BridgeError(f"Outlook folder not found: {restore_folder}")
+
+    state = load_state(state_path)
+    pending = dict(state.get("pending", {}))
+    fetch_limit = max(limit, len(pending) + 10 if pending else limit)
+    rows = fetch_folder_messages(folder_name, screens=screens, limit=fetch_limit)
+    rows_by_key = {message_key(row): row for row in rows}
+
+    if pending_only and pending:
+        candidates = [rows_by_key[key] for key in pending if key in rows_by_key]
+    else:
+        candidates = list(rows)
+    if only_read:
+        candidates = [row for row in candidates if not row.get("unread")]
+
+    summary = {
+        "timestamp": now_iso(),
+        "action": "restore-now",
+        "folder_name": folder_name,
+        "restore_folder": restore_folder,
+        "pending_only": pending_only,
+        "only_read": only_read,
+        "visible_in_folder": len(rows),
+        "planned": len(candidates),
+        "restored": 0,
+        "restore_failed": 0,
+        "events": [],
+    }
+
+    for row in candidates:
+        key = message_key(row)
+        result = move_message_to_folder(row, restore_folder)
+        event = {
+            "timestamp": now_iso(),
+            "action": "restore-now",
+            "key": key,
+            "from": row.get("from", ""),
+            "subject": row.get("subject", ""),
+            "status": "restored" if result.get("ok") else "restore-failed",
+            "result": result,
+        }
+        if result.get("ok"):
+            summary["restored"] += 1
+            pending.pop(key, None)
+        else:
+            summary["restore_failed"] += 1
+        summary["events"].append(event)
+        append_jsonl(event_log, event)
+        time.sleep(0.4)
+
+    state["pending"] = pending
+    state["updated_at"] = now_iso()
+    state["last_run"] = summary
+    save_state(state_path, state)
+    open_folder(restore_folder)
+    return summary
+
+
 def command_run_once(args: argparse.Namespace) -> int:
     payload = process_cycle(
         state_path=Path(args.state),
@@ -490,6 +562,21 @@ def command_bootstrap_pending(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_restore_now(args: argparse.Namespace) -> int:
+    payload = restore_now(
+        state_path=Path(args.state),
+        event_log=Path(args.event_log),
+        folder_name=args.folder,
+        restore_folder=args.restore_folder,
+        screens=args.screens,
+        limit=args.limit,
+        pending_only=not args.all_visible,
+        only_read=args.only_read,
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Night Review reminder and restore helper for Outlook Web.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -517,6 +604,17 @@ def build_parser() -> argparse.ArgumentParser:
     bootstrap.add_argument("--limit", type=int, default=50)
     bootstrap.add_argument("--moved-at")
     bootstrap.set_defaults(func=command_bootstrap_pending)
+
+    restore_now_parser = subparsers.add_parser("restore-now", help="Move Night Review messages back to Inbox immediately.")
+    restore_now_parser.add_argument("--state", default=str(DEFAULT_STATE))
+    restore_now_parser.add_argument("--event-log", default=str(DEFAULT_EVENT_LOG))
+    restore_now_parser.add_argument("--folder", default="Night Review")
+    restore_now_parser.add_argument("--restore-folder", default="Inbox")
+    restore_now_parser.add_argument("--screens", type=int, default=4)
+    restore_now_parser.add_argument("--limit", type=int, default=50)
+    restore_now_parser.add_argument("--all-visible", action="store_true", help="Restore everything currently visible in Night Review, not just tracked pending items.")
+    restore_now_parser.add_argument("--only-read", action="store_true", help="Restore only messages that Outlook currently shows as read.")
+    restore_now_parser.set_defaults(func=command_restore_now)
     return parser
 
 
