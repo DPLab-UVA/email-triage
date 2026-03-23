@@ -1,5 +1,5 @@
 {
-  "policy_version": 3,
+  "policy_version": 4,
   "priority_threshold": 4,
   "monitor_source_folder": "Inbox",
   "monitor_scan_screens": 1,
@@ -122,6 +122,11 @@
     {
       "subject_contains": "Funding Opportunity",
       "reason": "Funding-opportunity broadcasts should usually go to the nightly digest."
+    },
+    {
+      "sender_contains": "Office of Student Support",
+      "subject_contains": "Newsletter",
+      "reason": "Student support newsletters should not interrupt the inbox workflow."
     }
   ],
   "important_senders": [
@@ -183,6 +188,8 @@
     "call for speakers",
     "limited-time",
     "your best days start with better nights",
+    "dissertation defense",
+    "student support newsletter",
     "fee waiver",
     "special invitation to prof.",
     "special invitation to prof",
