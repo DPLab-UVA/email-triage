@@ -496,7 +496,7 @@ def llm_draft_reply(
     triage: dict[str, Any],
     rules: dict[str, Any],
     style_profile: dict[str, Any],
-) -> str:
+) -> str | None:
     cfg = rules.get("llm_drafts", {}) or {}
     if not cfg.get("enabled"):
         return ""
@@ -532,6 +532,7 @@ Signoff to use:
 {style_signoff(style_profile, rules) or "Best,\\nTianhao"}
 
 Rules:
+- if Tianhao should not reply, return an empty string for draft_reply
 - answer the sender's actual request directly in the first sentence
 - if the sender is asking permission, say yes/no clearly
 - ask at most one clarifying question, and only if needed
@@ -558,7 +559,7 @@ Latest reply from Tianhao in thread, if any:
             timeout_seconds=int(cfg.get("timeout_seconds", 90)),
         )
     except Exception:
-        return ""
+        return None
     return normalize_reply_text(str(result.get("draft_reply", "")))
 
 
@@ -621,87 +622,12 @@ def looks_automated_message(message: dict[str, Any]) -> bool:
 def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
     category = str(triage.get("category", "")).strip().lower()
     action = str(triage.get("action", "")).strip().lower()
-    subject = str(message.get("subject", "")).strip().lower()
-    sender = str(message.get("from", "")).strip()
-    body = message_body_for_model(message).lower()
-    latest_incoming = normalize_reply_text(str(message.get("latest_incoming_body", ""))).lower()
-    llm_judgment = triage.get("llm_judgment", {}) or {}
-    direct_reply_signals = [
-        "do you have any time",
-        "are you free",
-        "are you available",
-        "what time works",
-        "send a time",
-        "can we meet",
-        "could we meet",
-        "can you meet",
-        "would friday work",
-        "works for you",
-        "availability",
-    ]
-    direct_reply_needed = bool(latest_incoming) and any(token in latest_incoming for token in direct_reply_signals)
-    if any(
-        token in body
-        for token in [
-            "dear colleague",
-            "we are pleased to invite you",
-            "registration page",
-            "first-come, first-served",
-            "we look forward to your registration",
-        ]
-    ):
-        return False
-    if not message.get("latest_incoming_body") and len(extract_thread_blocks(message.get("pane_lines", []))) > 1:
-        return False
-    actionable = any(
-        token in body or token in subject
-        for token in [
-            "?",
-            "can you",
-            "could you",
-            "please",
-            "let me know",
-            "send",
-            "share",
-            "confirm",
-            "when you",
-            "once",
-            "deadline",
-            "availability",
-            "action required",
-            "attn required",
-        ]
-    )
     if not triage.get("important"):
         return False
-    if action.startswith("queue-auto-approve") or category == "expense_approval":
-        return False
-    if "needs_reply" in llm_judgment and not bool(llm_judgment.get("needs_reply")) and not direct_reply_needed:
+    if action.startswith("queue-auto-") or category == "expense_approval":
         return False
     if looks_automated_message(message):
         return False
-    if message.get("pinned") and not looks_automated_sender(sender):
-        return actionable
-    if category in {"security", "review", "review_invitation", "ticket"}:
-        return False
-    if any(
-        token in subject or token in body
-        for token in [
-            "new login to your",
-            "tracked flight",
-            "price alert",
-            "google flights",
-            "google scholar",
-            "submitted review #",
-            "comment for #",
-            "response for #",
-            "pre-register",
-            "verification code",
-        ]
-    ):
-        return False
-    if direct_reply_needed:
-        return True
     return True
 
 
@@ -792,7 +718,7 @@ def draft_reply_for_message(
         return ""
     style_profile = style_profile or {}
     llm_draft = llm_draft_reply(message, triage, rules, style_profile)
-    if llm_draft:
+    if llm_draft is not None:
         return llm_draft
     triage = {**triage, "style_profile": style_profile}
     opening = default_opening(message, triage)
