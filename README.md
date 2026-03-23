@@ -1,89 +1,197 @@
 # email-triage
 
-Browser-first Outlook triage for this Mac. It watches Outlook Web, decides which messages matter, moves low-priority mail into `Night Review`, opens real Outlook reply drafts for threads that need a response, and keeps a local audit trail so the policy can keep improving.
+I get around fifty emails a day. The real problem is not just volume. The problem is interruption.
 
-This repo is opinionated and personal. The current workflow is tuned for Tianhao's Outlook habits, not for a generic team rollout.
+If Outlook notifies me for all fifty, my flow gets broken fifty times. But if I turn notifications off completely, I still end up checking anyway, because a few of those emails really do matter. So the actual job is not "show me all email" and not "hide all email." The job is:
 
-## What It Does
+- keep the actually important ones in front of me
+- stop noisy mail from interrupting me
+- put the rest somewhere I can review later, on my own schedule
 
-- Monitors Outlook Web from a controlled browser session.
-- Keeps important mail in `Inbox` and shows a macOS notification.
-- Moves low-priority mail into `Night Review` and marks those messages read before moving.
-- Opens real Outlook reply drafts for important human threads that likely need a response.
-- Avoids drafting replies for automated mail, system alerts, newsletters, editorial spam, and similar bulk mail.
-- Queues special actions such as Workday expense approvals instead of replying.
-- Tracks `Night Review` state so the queue can be revisited and later restored to `Inbox`.
-- Learns triage and draft behavior from local rules, sent mail, and explicit corrections over time.
+This repo is the current best version of that idea for my setup.
 
-## Current Workflow
+## Why This Exists
 
-1. The live monitor watches the top of `Inbox`.
-2. Each newly seen message is triaged into one of three buckets:
-   - `important_notify`
-   - `important_action`
-   - `night_digest`
-3. `important_notify` stays in `Inbox`. If the message needs a reply, the system opens a real Outlook reply draft.
-4. `important_action` stays in `Inbox` and may trigger a narrow automation instead of a reply.
-5. `night_digest` is moved into `Night Review` and marked read first.
-6. At night, the system reminds the user to check `Night Review`.
-7. The next morning, carried-over Night Review items can be restored to `Inbox`.
+My university runs on Outlook. That matters, because Outlook is not a very friendly ecosystem if you want fine-grained local automation.
 
-The important distinction is:
+If you are on Gmail, or you only get a handful of emails a day, you probably do not need this. A few filters and some discipline are enough.
 
-- Important does not always mean reply.
-- Automated mail can still be important.
-- Reply drafts should only be opened for human threads that look like they genuinely need a response.
+If you are deep inside an Outlook-heavy university or enterprise workflow, and you want something smarter than "all notifications on" or "all notifications off," then this starts to make sense.
 
-## Main Components
+The core goal is simple:
 
-- [`browser/outlook_live_monitor.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_live_monitor.py)
-  Continuous monitor and policy executor.
-- [`browser/outlook_recent_triage.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_recent_triage.py)
-  Structured extraction and triage of recent visible Outlook messages.
-- [`browser/outlook_apply_triage.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_apply_triage.py)
-  Message movement and mark-read logic.
-- [`browser/outlook_draft_helper.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_draft_helper.py)
-  Reply-draft generation and injection into Outlook Web.
-- [`browser/outlook_auto_actions.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_auto_actions.py)
-  Narrow non-reply actions such as expense-approval follow-through.
-- [`browser/outlook_night_review.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py)
-  Night Review queue state, reminder, and restore logic.
-- [`shared/default_rules.json`](/Users/tianhao/Downloads/email-triage/shared/default_rules.json)
-  Policy, thresholds, hours, and LLM settings.
-- [`shared/triage_engine.py`](/Users/tianhao/Downloads/email-triage/shared/triage_engine.py)
-  Rule-guided triage plus LLM escalation.
+- important mail should stay in `Inbox` and be allowed to interrupt me
+- unimportant mail should not notify me
+- low-priority mail should be moved into `Night Review`
+- when something clearly needs a reply, the system should prepare a real Outlook draft so I can just send it, edit it, or delete it
 
-## Repo Layout
+## What I Tried Before Landing Here
 
-- `browser/`
-  Outlook Web control, monitor, drafts, and automation.
-- `shared/`
-  Rules, logs, JSON state, caches, and learned profiles.
-- `chrome-extension/`
-  Earlier DOM-capture tooling used during rapid prototyping.
-- `mail-app/`
-  Older Mail.app experiments and local helpers.
-- `docs/`
-  One-off generated documents and workflow artifacts.
-- `skill-snapshots/`
-  Snapshots of related local skills for archival/reference.
+This repo is not the first attempt.
 
-## Setup Assumptions
+I tried:
 
-This repo assumes all of the following:
+- direct Outlook Web DOM automation
+- a Chrome extension
+- a Mail.app route on macOS
+- more local-client style workflows
+
+All of those could do pieces of the job, but none felt stable enough as the main path.
+
+What ended up being the most mature setup was:
+
+- Outlook Web as the mail surface
+- browser automation as the control layer
+- local rules plus LLM judgment as the triage policy
+- a dedicated `Night Review` folder as the low-priority holding area
+
+That is what this repo implements.
+
+## What The System Does
+
+At a high level, it watches Outlook Web and makes one of three decisions for newly seen mail:
+
+- `important_notify`
+  Keep it in `Inbox`. If it looks reply-worthy, prepare a real Outlook draft.
+- `important_action`
+  Keep it in `Inbox`, but do not draft a reply if the right action is something else, such as approving an expense workflow.
+- `night_digest`
+  Mark it read and move it into `Night Review` so it stops interrupting me.
+
+Then later:
+
+- at night, it reminds me to check `Night Review`
+- after I finish reviewing, I can move those messages back to `Inbox`
+- if I forget to review them, they can stay there instead of being silently lost
+
+## Important Constraint
+
+Important does not mean reply-worthy.
+
+That distinction matters a lot.
+
+Examples:
+
+- a security alert can be important but should not get a reply draft
+- a Google Flights alert can be important but should not get a reply draft
+- a real human thread about hiring, reimbursement, logistics, or a research task might deserve both attention and a prepared draft
+
+The system is built around that distinction.
+
+## Assumptions And Prerequisites
+
+This setup assumes a fairly specific local environment.
+
+You should expect to need:
 
 - macOS
-- Outlook Web already works in Google Chrome
-- the active Outlook login is in Chrome `Profile 1`
-- `tmux` is installed
-- `bun` is installed at `~/.bun/bin/bun`
-- local browser automation is available through the gstack browse bridge
+- Outlook Web working in Chrome
+- the right Outlook login already alive in the browser profile the automation uses
+- `tmux`
+- `bun`
+- the local gstack browser tooling
+- the relevant Codex/browser skills installed
 
-The monitor controls a real logged-in browser session. Do not assume it is safe to run multiple browser-writing jobs at the same time.
+In practice, this repo was developed alongside local skills and browser tooling such as:
 
-## Start and Stop
+- Atlas, as a visible browser/session holder when that route is useful
+- gstack browse, as the more practical page-control layer
+- local Codex skills that help drive browser and mail workflows on this machine
 
-Start the live monitor:
+This is not meant to be plug-and-play for a random laptop. It is a personal system first.
+
+## What It Is Good At
+
+- reducing pointless Outlook interruptions
+- separating "important" from "later"
+- keeping `Pinned` or otherwise user-signaled mail out of the automated move path
+- preparing drafts for human threads that actually look like they need a response
+- handling some special workflows differently from normal reply logic
+
+## What It Is Not Good At
+
+- being a general-purpose Outlook product
+- working without browser/session context
+- promising API-level stability from Outlook Web DOM behavior
+- safely running multiple browser-writing automations on the same Outlook tab at the same time
+
+If another human or another automation is actively driving the same Outlook session, things can get weird. This system works best when it is the only thing touching that controlled Outlook tab.
+
+## Why Browser-First Instead Of API-First
+
+The short version is: because Outlook in this environment is easier to automate through the browser than through a clean official integration path.
+
+An API-first design would be cleaner in theory. In practice, for this exact university Outlook setup, browser control turned out to be the fastest path to something that actually worked end to end.
+
+So this repo is unapologetically pragmatic.
+
+## Storage
+
+Originally, most local runtime data lived in scattered `json` and `jsonl` files under `shared/`.
+
+That worked fine for fast prototyping, but it is not a great long-term storage model because:
+
+- it is annoying to query
+- it is easy to fragment state across too many files
+- it is harder to reason about history and feedback loops
+
+So the project now also mirrors key runtime events and state into a local SQLite database:
+
+- [`shared/email_triage.db`](/Users/tianhao/Downloads/email-triage/shared/email_triage.db)
+
+The JSON and JSONL files still exist because they are simple and useful, but SQLite is the better foundation for the next version.
+
+## How I Actually Use It
+
+The intended workflow is:
+
+1. Let the monitor watch Outlook Web.
+2. Important mail stays in `Inbox`.
+3. Low-priority mail gets moved into `Night Review`.
+4. At some point at night, review `Night Review`.
+5. If I am done, move those messages back to `Inbox`.
+6. If I have not dealt with them yet, leave them there and let them carry over.
+
+This matters because the system is trying to protect focus, not to hide information.
+
+## Moving Night Review Back
+
+If I have already checked `Night Review` and want the messages moved back to `Inbox`, I can do it explicitly with:
+
+```bash
+python3 /Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py restore-now
+```
+
+If I want to restore everything currently visible in that folder:
+
+```bash
+python3 /Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py restore-now --all-visible
+```
+
+If I want to restore only messages Outlook is currently showing as read:
+
+```bash
+python3 /Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py restore-now --only-read
+```
+
+In practice, I often just tell Codex to do it.
+
+## Main Moving Parts
+
+If you need to read code, start here:
+
+- [`browser/outlook_live_monitor.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_live_monitor.py)
+- [`browser/outlook_recent_triage.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_recent_triage.py)
+- [`browser/outlook_apply_triage.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_apply_triage.py)
+- [`browser/outlook_draft_helper.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_draft_helper.py)
+- [`browser/outlook_night_review.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py)
+- [`shared/triage_engine.py`](/Users/tianhao/Downloads/email-triage/shared/triage_engine.py)
+- [`shared/default_rules.json`](/Users/tianhao/Downloads/email-triage/shared/default_rules.json)
+- [`shared/sqlite_store.py`](/Users/tianhao/Downloads/email-triage/shared/sqlite_store.py)
+
+## Start And Stop
+
+Start the monitor:
 
 ```bash
 /Users/tianhao/Downloads/email-triage/browser/outlook_monitor_tmux_ctl.sh start
@@ -95,7 +203,7 @@ Check status:
 /Users/tianhao/Downloads/email-triage/browser/outlook_monitor_tmux_ctl.sh status
 ```
 
-Tail logs:
+See logs:
 
 ```bash
 /Users/tianhao/Downloads/email-triage/browser/outlook_monitor_tmux_ctl.sh logs
@@ -107,74 +215,23 @@ Stop it:
 /Users/tianhao/Downloads/email-triage/browser/outlook_monitor_tmux_ctl.sh stop
 ```
 
-## Night Review
+## Design Philosophy
 
-Low-priority mail goes into the Outlook folder `Night Review`.
+- Rules should be broad, not brittle.
+- Final judgment should come from understanding the actual email, not from isolated keywords.
+- Automated mail should almost never trigger a reply draft.
+- The system should optimize for preserving focus, not for maximizing automation theater.
+- If a message is important but not actionable, keep it visible and do not invent a reply.
 
-By default, the system:
+## Known Rough Edges
 
-- reminds the user at night
-- keeps unread carry-over items there
-- restores the queue to `Inbox` the next morning if the relevant carried-over messages are ready to come back
-
-If the user finishes reviewing earlier and wants everything moved back immediately, run:
-
-```bash
-python3 /Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py restore-now
-```
-
-If you want to restore every currently visible message in the folder, not just tracked pending items:
-
-```bash
-python3 /Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py restore-now --all-visible
-```
-
-If you want the command to restore only messages Outlook still shows as read:
-
-```bash
-python3 /Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py restore-now --only-read
-```
-
-This is the intended operator workflow:
-
-- the system moves low-priority mail into `Night Review`
-- the user checks that folder when convenient
-- after review, either the user tells Codex to move everything back, or runs `restore-now`
-
-## Important Local Files
-
-- [`shared/default_rules.json`](/Users/tianhao/Downloads/email-triage/shared/default_rules.json)
-  The main policy file.
-- [`shared/outlook_monitor_state.json`](/Users/tianhao/Downloads/email-triage/shared/outlook_monitor_state.json)
-  Live monitor state.
-- [`shared/outlook_monitor_events.jsonl`](/Users/tianhao/Downloads/email-triage/shared/outlook_monitor_events.jsonl)
-  Live monitor event log.
-- [`shared/outlook_night_review_state.json`](/Users/tianhao/Downloads/email-triage/shared/outlook_night_review_state.json)
-  Night Review queue state.
-- [`shared/outlook_night_review_events.jsonl`](/Users/tianhao/Downloads/email-triage/shared/outlook_night_review_events.jsonl)
-  Night Review reminder and restore log.
-- [`shared/outlook_monitor.stdout.log`](/Users/tianhao/Downloads/email-triage/shared/outlook_monitor.stdout.log)
-  Background monitor stdout.
-- [`shared/outlook_monitor.stderr.log`](/Users/tianhao/Downloads/email-triage/shared/outlook_monitor.stderr.log)
-  Background monitor stderr.
-
-## Design Principles
-
-- Rules should stay broad. Final decisions should come from understanding the specific email.
-- Do not overfit to isolated keywords.
-- Personalized, credible, actionable human threads deserve more weight than generic outreach.
-- Automated messages almost never need reply drafts.
-- Important notifications and reply-worthy threads are different things.
-- `Pinned` is a user override and should not be auto-moved.
-- Browser actions must be serialized. Competing tab automation will make the system unstable.
-
-## Known Constraints
-
-- The system is Outlook Web first. It is not yet a clean Outlook API product.
-- Outlook DOM and menu behavior can drift, so movement actions still need defensive retries.
-- Workday-style approval links may still require the real browser session or SSO context.
-- If another tool or human is actively driving the same Outlook tab, the monitor can interfere.
+- Outlook Web DOM is still Outlook Web DOM. It drifts.
+- Browser actions still need careful serialization.
+- Special workflows such as Workday approvals may still depend on the real browser session and SSO state.
+- This is a strong personal tool, not yet a clean reusable product.
 
 ## Privacy
 
-This repo intentionally keeps private working state local by default. Logs, caches, samples, and learned profiles under `shared/` may contain sensitive mail metadata or text. Review `.gitignore` carefully before publishing anything beyond source code.
+This repo touches real mail. Treat the runtime files accordingly.
+
+Even if source code is public, the live data under `shared/` can contain sensitive metadata, message text, and learned style artifacts. Review `.gitignore` and the SQLite contents before sharing anything wider.

@@ -51,6 +51,8 @@ from outlook_web_workflow import (
     DEFAULT_PROFILE,
     ensure_outlook_session,
 )
+sys.path.append(str(SHARED))
+from sqlite_store import mirror_jsonl_append, mirror_state  # noqa: E402
 
 DEFAULT_STATE = SHARED / "outlook_monitor_state.json"
 DEFAULT_EVENT_LOG = SHARED / "outlook_monitor_events.jsonl"
@@ -88,12 +90,14 @@ def load_state(path: Path) -> dict[str, Any]:
 def save_state(path: Path, state: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    mirror_state(path, state)
 
 
 def append_jsonl(path: Path, row: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    mirror_jsonl_append(path, row)
 
 
 def load_recent_events(path: Path, limit: int = 5) -> list[dict[str, Any]]:
@@ -206,7 +210,7 @@ def run_cycle(
         raise BridgeError(f"Could not open Outlook folder {source_folder}: {opened}")
 
     rows = fetch_recent_messages(screens=scan_screens, limit=limit, recent_only=not include_pinned)
-    triaged, summary = triage_recent_messages(rows, rules_path=rules_path, examples_path=examples_path)
+    triaged, summary = triage_recent_messages(rows, rules=rules, examples=examples)
     style_profile = load_style_profile(DEFAULT_STYLE_PROFILE)
     state = load_state(state_path)
     seen = set(state.get("seen_keys", []))

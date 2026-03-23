@@ -35,6 +35,7 @@ from outlook_web_workflow import (
 sys.path.append(str(SHARED))
 
 from triage_engine import load_json, load_jsonl, triage_message  # noqa: E402
+from sqlite_store import mirror_jsonl_append  # noqa: E402
 
 DEFAULT_SUGGESTIONS = SHARED / "outlook_draft_suggestions.jsonl"
 DEFAULT_FEEDBACK = SHARED / "outlook_draft_feedback.jsonl"
@@ -73,6 +74,7 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, ensure_ascii=False) + "\n")
+    mirror_jsonl_append(path, row)
 
 
 def useful_lines(text: str) -> list[str]:

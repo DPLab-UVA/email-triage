@@ -199,11 +199,19 @@ def fetch_recent_messages(*, screens: int, limit: int, recent_only: bool) -> lis
 def triage_recent_messages(
     rows: list[dict[str, Any]],
     *,
-    rules_path: Path,
-    examples_path: Path,
+    rules_path: Path | None = None,
+    examples_path: Path | None = None,
+    rules: dict[str, Any] | None = None,
+    examples: list[dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    rules = load_json(rules_path)
-    examples = load_jsonl(examples_path)
+    if rules is None:
+        if rules_path is None:
+            raise ValueError("rules or rules_path is required")
+        rules = load_json(rules_path)
+    if examples is None:
+        if examples_path is None:
+            raise ValueError("examples or examples_path is required")
+        examples = load_jsonl(examples_path)
     digest_folder = str(rules.get("nightly_digest_folder", "Night Review"))
     records: list[dict[str, Any]] = []
     summary = {

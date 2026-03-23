@@ -16,6 +16,8 @@ outlook-capture-*.json
 mail-app/*.json
 mail-app/*.jsonl
 shared/*.jsonl
+shared/*.db
+shared/*.db-*
 shared/*.log
 shared/*_top20.json
 shared/fast_rule_summary.json
