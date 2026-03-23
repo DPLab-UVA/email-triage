@@ -624,7 +624,22 @@ def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
     subject = str(message.get("subject", "")).strip().lower()
     sender = str(message.get("from", "")).strip()
     body = message_body_for_model(message).lower()
+    latest_incoming = normalize_reply_text(str(message.get("latest_incoming_body", ""))).lower()
     llm_judgment = triage.get("llm_judgment", {}) or {}
+    direct_reply_signals = [
+        "do you have any time",
+        "are you free",
+        "are you available",
+        "what time works",
+        "send a time",
+        "can we meet",
+        "could we meet",
+        "can you meet",
+        "would friday work",
+        "works for you",
+        "availability",
+    ]
+    direct_reply_needed = bool(latest_incoming) and any(token in latest_incoming for token in direct_reply_signals)
     if any(
         token in body
         for token in [
@@ -661,7 +676,7 @@ def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
         return False
     if action.startswith("queue-auto-approve") or category == "expense_approval":
         return False
-    if "needs_reply" in llm_judgment and not bool(llm_judgment.get("needs_reply")):
+    if "needs_reply" in llm_judgment and not bool(llm_judgment.get("needs_reply")) and not direct_reply_needed:
         return False
     if looks_automated_message(message):
         return False
@@ -685,6 +700,8 @@ def reply_eligible(message: dict[str, Any], triage: dict[str, Any]) -> bool:
         ]
     ):
         return False
+    if direct_reply_needed:
+        return True
     return True
 
 

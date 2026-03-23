@@ -1,5 +1,5 @@
 {
-  "policy_version": 4,
+  "policy_version": 5,
   "priority_threshold": 4,
   "monitor_source_folder": "Inbox",
   "monitor_scan_screens": 1,

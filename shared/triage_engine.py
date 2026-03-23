@@ -454,6 +454,7 @@ Closest labeled examples:
 Rules for needs_reply:
 - true only if this is likely a human thread that deserves a near-term human reply
 - false for automated, mass, bulk, newsletter, alert, or generic notification emails
+- if the sender is explicitly asking about meeting time, availability, or scheduling a near-term conversation, bias strongly toward true
 """.strip()
 
     decision = run_codex_llm_judge(
