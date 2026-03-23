@@ -927,7 +927,13 @@ def open_outlook_reply_draft(
             "compose_state": current_compose_state(),
         }
 
-    selected = select_visible_message(str(message.get("dom_id", "")), str(message.get("subject", "")))
+    selected = select_visible_message(
+        str(message.get("dom_id", "")),
+        str(message.get("subject", "")),
+        sender=str(message.get("from", "")),
+        received_at=str(message.get("received_at", "")),
+        conversation_id=str(message.get("conversation_id", "")),
+    )
     if not selected.get("ok"):
         return {"ok": False, "reason": "select-failed", "selection": selected}
 
@@ -1023,7 +1029,13 @@ def harvest_sent_feedback(
         if identity in existing_feedback:
             continue
 
-        selected = select_visible_message(str(row.get("dom_id", "")), str(row.get("subject", "")))
+        selected = select_visible_message(
+            str(row.get("dom_id", "")),
+            str(row.get("subject", "")),
+            sender=str(row.get("from", "")),
+            received_at=str(row.get("received_at", "")),
+            conversation_id=str(row.get("conversation_id", "")),
+        )
         if not selected.get("ok"):
             skipped.append(
                 {
@@ -1218,7 +1230,13 @@ def command_suggest_folder(args: argparse.Namespace) -> int:
             )
             continue
 
-        selected = select_visible_message(str(row.get("dom_id", "")), str(row.get("subject", "")))
+        selected = select_visible_message(
+            str(row.get("dom_id", "")),
+            str(row.get("subject", "")),
+            sender=str(row.get("from", "")),
+            received_at=str(row.get("received_at", "")),
+            conversation_id=str(row.get("conversation_id", "")),
+        )
         if not selected.get("ok"):
             skipped.append(
                 {

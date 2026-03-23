@@ -3,6 +3,8 @@
   "priority_threshold": 4,
   "monitor_source_folder": "Inbox",
   "monitor_scan_screens": 1,
+  "monitor_max_scan_screens": 6,
+  "monitor_cursor_window": 12,
   "llm_triage": {
     "enabled": true,
     "provider": "codex",

@@ -71,7 +71,7 @@ def parse_option(row: dict[str, Any]) -> dict[str, Any] | None:
     else:
         body_preview = " ".join(lines[2:]).strip()
 
-    return {
+    parsed = {
         "source": "outlook_web_recent",
         "dom_id": row.get("dom_id", ""),
         "conversation_id": row.get("conversation_id", ""),
@@ -87,6 +87,26 @@ def parse_option(row: dict[str, Any]) -> dict[str, Any] | None:
         "body": body_preview,
         "raw_text": row.get("raw_text", ""),
     }
+    parsed["cursor_key"] = message_cursor_key(parsed)
+    return parsed
+
+
+def message_cursor_key(row: dict[str, Any]) -> str:
+    conversation_id = clean_line(str(row.get("conversation_id", "")))
+    sender = clean_line(str(row.get("from", row.get("sender", ""))))
+    subject = clean_line(str(row.get("subject", "")))
+    received_at = clean_line(str(row.get("received_at", "")))
+    body = clean_line(str(row.get("body", "")))[:80]
+    dom_id = clean_line(str(row.get("dom_id", "")))
+    identity = {
+        "conversation_id": conversation_id,
+        "sender": sender,
+        "subject": subject,
+        "received_at": received_at,
+        "body": body,
+        "dom_id": dom_id,
+    }
+    return json.dumps(identity, ensure_ascii=False, sort_keys=True)
 
 
 def current_visible_options() -> list[dict[str, Any]]:
@@ -166,19 +186,51 @@ def reset_message_list_scroll() -> None:
     bridge_js(expr, timeout=10.0)
 
 
-def fetch_recent_messages(*, screens: int, limit: int, recent_only: bool) -> list[dict[str, Any]]:
+def top_cursor_keys(*, limit: int, recent_only: bool) -> list[str]:
+    keys: list[str] = []
+    seen: set[str] = set()
+    for row in current_visible_options():
+        parsed = parse_option(row)
+        if not parsed:
+            continue
+        if recent_only and not parsed.get("received_at"):
+            continue
+        key = str(parsed.get("cursor_key", "")).strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        keys.append(key)
+        if len(keys) >= limit:
+            break
+    return keys
+
+
+def fetch_recent_messages(
+    *,
+    screens: int,
+    limit: int,
+    recent_only: bool,
+    stop_keys: set[str] | None = None,
+    max_screens: int | None = None,
+) -> list[dict[str, Any]]:
     ensure_outlook_session(DEFAULT_BROWSER, DEFAULT_PROFILE, DEFAULT_COOKIE_DOMAINS)
     collected: list[dict[str, Any]] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[str] = set()
+    stop_keys = {key for key in (stop_keys or set()) if key}
+    screen_cap = max(1, int(max_screens or screens))
+    stop_hit = False
 
-    for _ in range(max(1, screens)):
+    for _ in range(screen_cap):
         for row in current_visible_options():
             parsed = parse_option(row)
             if not parsed:
                 continue
             if recent_only and not parsed.get("received_at"):
                 continue
-            key = (parsed.get("conversation_id", ""), parsed.get("subject", ""))
+            key = str(parsed.get("cursor_key", "")).strip()
+            if stop_keys and key in stop_keys:
+                stop_hit = True
+                break
             if key in seen:
                 continue
             seen.add(key)
@@ -187,6 +239,8 @@ def fetch_recent_messages(*, screens: int, limit: int, recent_only: bool) -> lis
                 reset_message_list_scroll()
                 return collected
 
+        if stop_hit:
+            break
         scroll_info = scroll_message_list()
         if not scroll_info.get("ok") or scroll_info.get("after") == scroll_info.get("before"):
             break

@@ -121,16 +121,35 @@ JSON.stringify(
     return bridge_json(expr, timeout=10.0) or {}
 
 
-def select_visible_message(dom_id: str, subject: str) -> dict[str, Any]:
+def select_visible_message(
+    dom_id: str,
+    subject: str,
+    *,
+    sender: str = "",
+    received_at: str = "",
+    conversation_id: str = "",
+) -> dict[str, Any]:
     expr = f"""
 JSON.stringify(
   (() => {{
     const domId = {json.dumps(dom_id, ensure_ascii=False)};
     const subject = {json.dumps(subject, ensure_ascii=False)};
+    const sender = {json.dumps(sender, ensure_ascii=False)};
+    const receivedAt = {json.dumps(received_at, ensure_ascii=False)};
+    const conversationId = {json.dumps(conversation_id, ensure_ascii=False)};
     const normalize = (value) => (value || '')
       .replace(/[\\uE000-\\uF8FF]/g, ' ')
       .replace(/\\s+/g, ' ')
       .trim();
+    const scoreCandidate = (text, convid) => {{
+      let score = 0;
+      if (domId) score += 0;
+      if (conversationId && convid === conversationId) score += 10;
+      if (subject && text.includes(subject)) score += 5;
+      if (sender && text.includes(sender)) score += 3;
+      if (receivedAt && text.includes(receivedAt)) score += 2;
+      return score;
+    }};
     const click = (el) => {{
       el.scrollIntoView({{ block: 'center' }});
       el.dispatchEvent(new MouseEvent('mousedown', {{ bubbles: true }}));
@@ -141,10 +160,27 @@ JSON.stringify(
     let el = domId ? document.getElementById(domId) : null;
     let strategy = 'dom_id';
     if (!el || el.getAttribute('role') !== 'option') {{
-      strategy = 'subject';
-      el = Array.from(document.querySelectorAll('[role="option"]')).find((candidate) =>
-        normalize(candidate.innerText || candidate.textContent || '').includes(subject)
-      ) || null;
+      const options = Array.from(document.querySelectorAll('[role="option"]'));
+      const byConversation = conversationId
+        ? options.find((candidate) => (candidate.getAttribute('data-convid') || '') === conversationId)
+        : null;
+      if (byConversation) {{
+        el = byConversation;
+        strategy = 'conversation_id';
+      }} else {{
+        let best = null;
+        let bestScore = -1;
+        for (const candidate of options) {{
+          const text = normalize(candidate.innerText || candidate.textContent || '');
+          const score = scoreCandidate(text, candidate.getAttribute('data-convid') || '');
+          if (score > bestScore) {{
+            best = candidate;
+            bestScore = score;
+          }}
+        }}
+        el = bestScore > 0 ? best : null;
+        strategy = 'composite';
+      }}
     }}
     if (!el) {{
       return {{ ok: false, reason: 'message-not-found', dom_id: domId, subject }};
@@ -165,22 +201,31 @@ JSON.stringify(
     result = bridge_json(expr, timeout=15.0) or {}
     if result.get("ok"):
         time.sleep(0.2)
-        if selected_subject_matches(subject):
+        if selected_subject_matches(subject, sender=sender, received_at=received_at, conversation_id=conversation_id):
             result["selected"] = True
             return result
-        fallback = click_option_via_snapshot(subject)
+        fallback = click_option_via_snapshot(subject, sender=sender, received_at=received_at, conversation_id=conversation_id)
         result["fallback"] = fallback
         if fallback.get("ok"):
             time.sleep(0.3)
-            result["selected"] = selected_subject_matches(subject)
+            result["selected"] = selected_subject_matches(subject, sender=sender, received_at=received_at, conversation_id=conversation_id)
     return result
 
 
-def selected_subject_matches(subject: str) -> bool:
+def selected_subject_matches(
+    subject: str,
+    *,
+    sender: str = "",
+    received_at: str = "",
+    conversation_id: str = "",
+) -> bool:
     expr = f"""
 JSON.stringify(
   (() => {{
     const subject = {json.dumps(subject, ensure_ascii=False)};
+    const sender = {json.dumps(sender, ensure_ascii=False)};
+    const receivedAt = {json.dumps(received_at, ensure_ascii=False)};
+    const conversationId = {json.dumps(conversation_id, ensure_ascii=False)};
     const normalize = (value) => (value || '')
       .replace(/[\\uE000-\\uF8FF]/g, ' ')
       .replace(/\\s+/g, ' ')
@@ -189,25 +234,52 @@ JSON.stringify(
       (el) => el.getAttribute('aria-selected') === 'true'
     );
     if (!selected) return false;
-    return normalize(selected.innerText || selected.textContent || '').includes(subject);
+    const text = normalize(selected.innerText || selected.textContent || '');
+    const convid = selected.getAttribute('data-convid') || '';
+    if (conversationId && convid === conversationId) return true;
+    if (subject && !text.includes(subject)) return false;
+    if (sender && !text.includes(sender)) return false;
+    if (receivedAt && !text.includes(receivedAt)) return false;
+    return Boolean(subject || sender || receivedAt);
   }})()
 )
 """.strip()
     return bool(bridge_json(expr, timeout=10.0))
 
 
-def click_option_via_snapshot(subject: str) -> dict[str, Any]:
+def click_option_via_snapshot(
+    subject: str,
+    *,
+    sender: str = "",
+    received_at: str = "",
+    conversation_id: str = "",
+) -> dict[str, Any]:
     snapshot = bridge_cmd("snapshot", "-i", timeout=20.0)
     pattern = re.compile(r"^\s*(@e\d+)\s+\[option\]\s+\"(.*)$")
+    best: tuple[int, str, str] | None = None
     for line in snapshot.splitlines():
         match = pattern.match(line)
         if not match:
             continue
         element_id, text = match.groups()
-        if subject in text:
-            bridge_cmd("click", element_id, timeout=10.0)
-            return {"ok": True, "strategy": "snapshot", "element_id": element_id}
-    return {"ok": False, "reason": "snapshot-option-not-found"}
+        score = 0
+        if conversation_id and conversation_id in text:
+            score += 10
+        if subject and subject in text:
+            score += 5
+        if sender and sender in text:
+            score += 3
+        if received_at and received_at in text:
+            score += 2
+        if score <= 0:
+            continue
+        if best is None or score > best[0]:
+            best = (score, element_id, text)
+    if not best:
+        return {"ok": False, "reason": "snapshot-option-not-found"}
+    _, element_id, text = best
+    bridge_cmd("click", element_id, timeout=10.0)
+    return {"ok": True, "strategy": "snapshot", "element_id": element_id, "text": text}
 
 
 def inspect_move_picker(folder_name: str) -> dict[str, Any]:
@@ -511,7 +583,13 @@ JSON.stringify(
 
 def move_message_to_folder(row: dict[str, Any], folder_name: str, *, mark_read_before_move: bool = False) -> dict[str, Any]:
     dismiss_move_dialog()
-    selection = select_visible_message(str(row.get("dom_id", "")), str(row.get("subject", "")))
+    selection = select_visible_message(
+        str(row.get("dom_id", "")),
+        str(row.get("subject", "")),
+        sender=str(row.get("from", "")),
+        received_at=str(row.get("received_at", "")),
+        conversation_id=str(row.get("conversation_id", "")),
+    )
     if not selection.get("ok"):
         return {"ok": False, "step": "select", "detail": selection}
     time.sleep(0.4)

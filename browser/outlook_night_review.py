@@ -17,6 +17,7 @@ from outlook_apply_triage import folder_exists, move_message_to_folder
 from outlook_recent_triage import (
     SHARED,
     current_visible_options,
+    message_cursor_key,
     parse_option,
     reset_message_list_scroll,
     scroll_message_list,
@@ -65,17 +66,35 @@ def load_state(path: Path) -> dict[str, Any]:
         return {
             "created_at": now_iso(),
             "updated_at": "",
+            "key_schema_version": 2,
             "pending": {},
             "last_reminder_date": "",
             "last_restore_date": "",
             "last_run": {},
         }
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        state = json.loads(path.read_text(encoding="utf-8"))
+        pending = {}
+        for raw_key, record in dict(state.get("pending", {})).items():
+            migrated = dict(record)
+            migrated_key = message_cursor_key(
+                {
+                    "conversation_id": migrated.get("conversation_id", ""),
+                    "from": migrated.get("from", ""),
+                    "subject": migrated.get("subject", ""),
+                    "received_at": migrated.get("received_at", ""),
+                }
+            )
+            migrated["key"] = migrated_key
+            pending[migrated_key] = migrated
+        state["pending"] = pending
+        state.setdefault("key_schema_version", 2)
+        return state
     except json.JSONDecodeError:
         return {
             "created_at": now_iso(),
             "updated_at": "",
+            "key_schema_version": 2,
             "pending": {},
             "last_reminder_date": "",
             "last_restore_date": "",
@@ -97,17 +116,7 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
 
 
 def message_key(row: dict[str, Any]) -> str:
-    conversation_id = str(row.get("conversation_id", "")).strip()
-    if conversation_id:
-        return f"convid:{conversation_id}"
-    dom_id = str(row.get("dom_id", "")).strip()
-    if dom_id:
-        return f"dom:{dom_id}"
-    return "fallback:{from_}|{subject}|{received_at}".format(
-        from_=str(row.get("from", "")).strip(),
-        subject=str(row.get("subject", "")).strip(),
-        received_at=str(row.get("received_at", "")).strip(),
-    )
+    return message_cursor_key(row)
 
 
 def register_pending_message(state_path: Path, row: dict[str, Any], *, moved_at: str | None = None) -> dict[str, Any]:

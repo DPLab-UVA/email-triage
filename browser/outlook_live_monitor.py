@@ -42,6 +42,8 @@ from outlook_recent_triage import (
     fetch_recent_messages,
     load_json,
     load_jsonl,
+    message_cursor_key,
+    top_cursor_keys,
     triage_recent_messages,
 )
 from outlook_reply_style import DEFAULT_SAMPLES as DEFAULT_STYLE_SAMPLES, refresh_style_profile
@@ -68,19 +70,37 @@ def load_state(path: Path) -> dict[str, Any]:
             "created_at": now_iso(),
             "updated_at": "",
             "initialized": False,
+            "key_schema_version": 2,
             "seen_keys": [],
+            "scan_cursor_keys": [],
             "attempt_counts": {},
             "last_feedback_scan_at": "",
             "last_run": {},
         }
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        state = json.loads(path.read_text(encoding="utf-8"))
+        if int(state.get("key_schema_version", 1)) < 2:
+            state["initialized"] = False
+            state["seen_keys"] = []
+            state["scan_cursor_keys"] = []
+            state["attempt_counts"] = {}
+            state["key_schema_version"] = 2
+            state["last_run"] = {
+                "status": "migrated-key-schema",
+                "note": "reset seen state so the new cursor-based key schema can re-baseline cleanly",
+            }
+        else:
+            state.setdefault("scan_cursor_keys", [])
+            state.setdefault("key_schema_version", 2)
+        return state
     except json.JSONDecodeError:
         return {
             "created_at": now_iso(),
             "updated_at": "",
             "initialized": False,
+            "key_schema_version": 2,
             "seen_keys": [],
+            "scan_cursor_keys": [],
             "attempt_counts": {},
             "last_feedback_scan_at": "",
             "last_run": {"error": "state file was invalid json and was reset"},
@@ -117,17 +137,7 @@ def load_recent_events(path: Path, limit: int = 5) -> list[dict[str, Any]]:
 
 
 def message_key(row: dict[str, Any]) -> str:
-    conversation_id = str(row.get("conversation_id", "")).strip()
-    if conversation_id:
-        return f"convid:{conversation_id}"
-    dom_id = str(row.get("dom_id", "")).strip()
-    if dom_id:
-        return f"dom:{dom_id}"
-    return "fallback:{from_}|{subject}|{received_at}".format(
-        from_=str(row.get("from", "")).strip(),
-        subject=str(row.get("subject", "")).strip(),
-        received_at=str(row.get("received_at", "")).strip(),
-    )
+    return message_cursor_key(row)
 
 
 def mark_seen(state: dict[str, Any], key: str, *, max_seen: int) -> None:
@@ -205,15 +215,25 @@ def run_cycle(
     examples = load_jsonl(examples_path)
     source_folder = str(rules.get("monitor_source_folder", "Inbox"))
     scan_screens = max(1, int(rules.get("monitor_scan_screens", 1)))
+    max_scan_screens = max(scan_screens, int(rules.get("monitor_max_scan_screens", 6)))
+    cursor_window = max(3, int(rules.get("monitor_cursor_window", 12)))
     opened = open_folder(source_folder)
     if not opened.get("ok"):
         raise BridgeError(f"Could not open Outlook folder {source_folder}: {opened}")
 
-    rows = fetch_recent_messages(screens=scan_screens, limit=limit, recent_only=not include_pinned)
+    state = load_state(state_path)
+    stop_keys = set(state.get("scan_cursor_keys", [])) if state.get("initialized") else set()
+    rows = fetch_recent_messages(
+        screens=scan_screens,
+        max_screens=max_scan_screens,
+        limit=limit,
+        recent_only=not include_pinned,
+        stop_keys=stop_keys,
+    )
     triaged, summary = triage_recent_messages(rows, rules=rules, examples=examples)
     style_profile = load_style_profile(DEFAULT_STYLE_PROFILE)
-    state = load_state(state_path)
     seen = set(state.get("seen_keys", []))
+    state["scan_cursor_keys"] = top_cursor_keys(limit=cursor_window, recent_only=not include_pinned)
     folder_name = str(summary.get("nightly_digest_folder", "Night Review"))
     reminder_hour = int(rules.get("nightly_digest_hour_local", 21))
     restore_hour = int(rules.get("night_review_restore_hour_local", 7))
@@ -279,6 +299,9 @@ def run_cycle(
                 selection = select_visible_message(
                     str(row.get("dom_id", "")),
                     str(row.get("subject", "")),
+                    sender=str(row.get("from", "")),
+                    received_at=str(row.get("received_at", "")),
+                    conversation_id=str(row.get("conversation_id", "")),
                 )
                 event["selection_for_draft"] = selection
                 if selection.get("ok"):
@@ -320,6 +343,9 @@ def run_cycle(
                 selection = select_visible_message(
                     str(row.get("dom_id", "")),
                     str(row.get("subject", "")),
+                    sender=str(row.get("from", "")),
+                    received_at=str(row.get("received_at", "")),
+                    conversation_id=str(row.get("conversation_id", "")),
                 )
                 event["action"] = "auto-approve-expense"
                 event["selection_for_auto_action"] = selection
@@ -405,6 +431,7 @@ def run_cycle(
             }
         state["last_feedback_scan_at"] = now_iso()
     state["initialized"] = True
+    state["key_schema_version"] = 2
     state["updated_at"] = now_iso()
     state["last_run"] = payload
     save_state(state_path, state)
