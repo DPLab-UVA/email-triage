@@ -59,13 +59,63 @@ JSON.stringify(
       .replace(/[\\uE000-\\uF8FF]/g, ' ')
       .replace(/\\s+/g, ' ')
       .trim();
+    const cleanFolder = (value) => normalize(value)
+      .replace(/\\bselected\\b/gi, '')
+      .replace(/\\b\\d+\\s+(?:item|items|unread)\\b/gi, '')
+      .replace(/\\s+/g, ' ')
+      .trim();
     return Array.from(document.querySelectorAll('[role="treeitem"]')).some(
-      (el) => normalize(el.innerText || el.textContent || '') === target
+      (el) => cleanFolder(el.innerText || el.textContent || '') === target
     );
   }})()
 )
 """.strip()
     return bool(bridge_json(expr, timeout=10.0))
+
+
+def mark_selected_message_read() -> dict[str, Any]:
+    expr = """
+JSON.stringify(
+  (() => {
+    const normalize = (value) => (value || '')
+      .replace(/[\\uE000-\\uF8FF]/g, ' ')
+      .replace(/\\s+/g, ' ')
+      .trim();
+    const click = (el) => {
+      el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+      el.click();
+    };
+    const selected = Array.from(document.querySelectorAll('[role="option"]')).find(
+      (el) => el.getAttribute('aria-selected') === 'true'
+    );
+    const scopes = [];
+    if (selected) scopes.push(selected);
+    scopes.push(document);
+    for (const scope of scopes) {
+      const unreadButton = Array.from(scope.querySelectorAll('button, [role="button"], [title], [aria-label]')).find((el) => {
+        const label = normalize(el.getAttribute('title') || el.getAttribute('aria-label') || el.innerText || el.textContent || '');
+        return label === 'Mark as unread';
+      });
+      if (unreadButton) {
+        return { ok: true, status: 'already-read' };
+      }
+      const button = Array.from(scope.querySelectorAll('button, [role="button"], [title], [aria-label]')).find((el) => {
+        const label = normalize(el.getAttribute('title') || el.getAttribute('aria-label') || el.innerText || el.textContent || '');
+        return label === 'Mark as read';
+      });
+      if (button) {
+        click(button);
+        return { ok: true, status: 'clicked' };
+      }
+    }
+    return { ok: true, status: 'control-not-found' };
+  })(),
+  null,
+  2
+)
+""".strip()
+    return bridge_json(expr, timeout=10.0) or {}
 
 
 def select_visible_message(dom_id: str, subject: str) -> dict[str, Any]:
@@ -456,16 +506,28 @@ JSON.stringify(
     return bridge_json(expr, timeout=15.0) or []
 
 
-def move_message_to_folder(row: dict[str, Any], folder_name: str) -> dict[str, Any]:
+def move_message_to_folder(row: dict[str, Any], folder_name: str, *, mark_read_before_move: bool = False) -> dict[str, Any]:
     dismiss_move_dialog()
     selection = select_visible_message(str(row.get("dom_id", "")), str(row.get("subject", "")))
     if not selection.get("ok"):
         return {"ok": False, "step": "select", "detail": selection}
     time.sleep(0.4)
+    read_result: dict[str, Any] | None = None
+    if mark_read_before_move and bool(row.get("unread")):
+        read_result = mark_selected_message_read()
+        time.sleep(0.3)
 
     opened = open_move_picker(folder_name)
     if not opened.get("ok"):
-        return {"ok": False, "step": "open_move_picker", "detail": opened}
+        return {
+            "ok": False,
+            "step": "open_move_picker",
+            "detail": {
+                "selection": selection,
+                "mark_read": read_result,
+                "opened": opened,
+            },
+        }
     time.sleep(0.5)
 
     if opened.get("stage") == "direct-menu-folder":
@@ -479,6 +541,7 @@ def move_message_to_folder(row: dict[str, Any], folder_name: str) -> dict[str, A
             "step": "move-direct",
             "detail": {
                 "selection": selection,
+                "mark_read": read_result,
                 "opened": opened,
                 "clicked_folder": clicked_folder,
                 "still_visible": still_visible,
@@ -502,6 +565,7 @@ def move_message_to_folder(row: dict[str, Any], folder_name: str) -> dict[str, A
                     "step": "move-direct-retry",
                     "detail": {
                         "selection": selection,
+                        "mark_read": read_result,
                         "opened": reopened,
                         "clicked_folder": clicked_folder,
                         "still_visible": still_visible,
@@ -533,6 +597,7 @@ def move_message_to_folder(row: dict[str, Any], folder_name: str) -> dict[str, A
         "step": "move",
         "detail": {
             "selection": selection,
+            "mark_read": read_result,
             "opened": opened,
             "chosen": chosen,
             "moved": moved,
@@ -588,7 +653,7 @@ def apply_triage_actions(
             action["status"] = "planned"
             action["result"] = {"ok": True, "step": "dry-run"}
         else:
-            result = move_message_to_folder(row, folder_name)
+            result = move_message_to_folder(row, folder_name, mark_read_before_move=True)
             action["status"] = "moved" if result.get("ok") else "failed"
             action["result"] = result
         actions.append(action)

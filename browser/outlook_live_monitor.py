@@ -17,15 +17,17 @@ from outlook_apply_triage import (
     DEFAULT_ACTION_LOG,
     folder_exists,
     move_message_to_folder,
+    select_visible_message,
 )
 from outlook_draft_helper import (
     DEFAULT_FEEDBACK,
     DEFAULT_STYLE_PROFILE,
     DEFAULT_SUGGESTIONS,
-    draft_reply_for_message,
+    classify_message_payload,
     harvest_sent_feedback,
     load_style_profile,
     open_outlook_reply_draft,
+    selected_message_payload,
 )
 from outlook_night_review import (
     DEFAULT_EVENT_LOG as DEFAULT_NIGHT_REVIEW_EVENT_LOG,
@@ -38,6 +40,7 @@ from outlook_recent_triage import (
     SHARED,
     fetch_recent_messages,
     load_json,
+    load_jsonl,
     triage_recent_messages,
 )
 from outlook_reply_style import DEFAULT_SAMPLES as DEFAULT_STYLE_SAMPLES, refresh_style_profile
@@ -194,6 +197,7 @@ def run_cycle(
     ensure_outlook_session(DEFAULT_BROWSER, DEFAULT_PROFILE, DEFAULT_COOKIE_DOMAINS)
 
     rules = load_json(rules_path)
+    examples = load_jsonl(examples_path)
     source_folder = str(rules.get("monitor_source_folder", "Inbox"))
     scan_screens = max(1, int(rules.get("monitor_scan_screens", 1)))
     opened = open_folder(source_folder)
@@ -264,26 +268,33 @@ def run_cycle(
             clear_attempt(state, key)
         elif row.get("bucket") == "important_notify":
             event["action"] = "notify"
-            draft_reply = draft_reply_for_message(
-                {
-                    **row,
-                    "body_full": row.get("body", ""),
-                },
-                row.get("triage", {}),
-                rules,
-                style_profile,
-            )
-            if draft_reply:
-                event["outlook_draft"] = open_outlook_reply_draft(
-                    {
-                        **row,
-                        "body_full": row.get("body", ""),
-                    },
-                    {
-                        **row.get("triage", {}),
-                        "draft_reply": draft_reply,
-                    },
+            full_message = None
+            full_triage = None
+            try:
+                selection = select_visible_message(
+                    str(row.get("dom_id", "")),
+                    str(row.get("subject", "")),
                 )
+                event["selection_for_draft"] = selection
+                if selection.get("ok"):
+                    full_message = selected_message_payload()
+                    full_triage = classify_message_payload(full_message, rules, examples, style_profile=style_profile)
+                    event["full_triage"] = {
+                        "important": bool(full_triage.get("important")),
+                        "category": full_triage.get("category", ""),
+                        "action": full_triage.get("action", ""),
+                        "reasons": full_triage.get("reasons", []),
+                        "llm_judgment": full_triage.get("llm_judgment", {}),
+                    }
+            except Exception as exc:
+                event["draft_prep_error"] = str(exc)
+            if full_message and full_triage and str(full_triage.get("draft_reply", "")).strip():
+                event["outlook_draft"] = open_outlook_reply_draft(full_message, full_triage)
+            else:
+                event["outlook_draft"] = {
+                    "ok": False,
+                    "reason": "no-draft-reply-after-full-thread-parse",
+                }
             if notify:
                 notified = notify_user(row, str(row.get("reason", "")))
                 event["status"] = "notified" if notified else "notify-failed"
@@ -301,7 +312,7 @@ def run_cycle(
                 event["attempt"] = attempt
                 mark_seen(state, key, max_seen=max_seen)
             else:
-                result = move_message_to_folder(row, folder_name)
+                result = move_message_to_folder(row, folder_name, mark_read_before_move=True)
                 event["action"] = "queue-auto-action" if row.get("bucket") == "auto_action" else "move-to-night-review"
                 event["result"] = result
                 if result.get("ok"):

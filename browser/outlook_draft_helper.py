@@ -587,6 +587,10 @@ def default_opening(message: dict[str, Any], triage: dict[str, Any]) -> str:
     if preferred:
         return preferred
 
+    if "revise" in subject and "resubmit" in subject:
+        return "Yes, that's fine."
+    if "revise" in body and "resubmit" in body and "proposal" in body:
+        return "Yes, that's fine."
     if "availability" in subject or "availability" in body:
         return "I can do that."
     if "budget" in subject or "budget" in body:
@@ -614,6 +618,14 @@ def default_follow_up(message: dict[str, Any], triage: dict[str, Any]) -> str:
     if preferred:
         return preferred
 
+    if "revise" in subject and "resubmit" in subject:
+        if "timeline" in body or "risk assessment" in body:
+            return "Please send me the revised version by email once it's ready, including the timeline and risk assessment."
+        return "Please send me the revised version by email once it's ready."
+    if "revise" in body and "resubmit" in body and "proposal" in body:
+        if "timeline" in body or "risk assessment" in body:
+            return "Please send me the revised version by email once it's ready, including the timeline and risk assessment."
+        return "Please send me the revised version by email once it's ready."
     if "availability" in subject or "availability" in body:
         return "If needed, I can adjust a bit on my side."
     if "flight" in body and "detail" in body:
