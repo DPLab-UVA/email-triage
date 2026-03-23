@@ -413,7 +413,10 @@ def llm_judge_message(message: dict[str, Any], rules: dict[str, Any], examples: 
     if provider != "codex":
         return None
 
-    cache_path = Path(str(llm_cfg.get("cache_path") or (SHARED / "triage_llm_cache.json")))
+    cache_value = str(llm_cfg.get("cache_path") or (SHARED / "triage_llm_cache.json"))
+    cache_path = Path(cache_value).expanduser()
+    if not cache_path.is_absolute():
+        cache_path = ROOT / cache_path
     cache = load_cache(cache_path)
     key = llm_cache_key(message, rules)
     cached = cache.get(key)

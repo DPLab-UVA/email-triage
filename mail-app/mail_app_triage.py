@@ -7,6 +7,7 @@ import argparse
 import difflib
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -15,9 +16,22 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARED_DIR = ROOT / "shared"
-MAIL_APP_CLI = Path(
-    "/Users/tianhao/Library/CloudStorage/Dropbox/notes/skills/mail-app-mailbox/scripts/mail_app_mailbox.py"
-)
+
+
+def resolve_mail_app_cli() -> Path:
+    env = Path(os.environ["MAIL_APP_MAILBOX_CLI"]).expanduser() if "MAIL_APP_MAILBOX_CLI" in os.environ else None
+    candidates = [
+        env,
+        Path.home() / "Library/CloudStorage/Dropbox/notes/skills/mail-app-mailbox/scripts/mail_app_mailbox.py",
+        ROOT / "skill-snapshots" / "mail-app-mailbox" / "scripts" / "mail_app_mailbox.py",
+    ]
+    for candidate in candidates:
+        if candidate and candidate.exists():
+            return candidate
+    return candidates[1]
+
+
+MAIL_APP_CLI = resolve_mail_app_cli()
 DEFAULT_RULES = SHARED_DIR / "default_rules.json"
 DEFAULT_EXAMPLES = SHARED_DIR / "example_labeled_emails.jsonl"
 DEFAULT_STATE = Path(__file__).with_name("mail_app_state.json")

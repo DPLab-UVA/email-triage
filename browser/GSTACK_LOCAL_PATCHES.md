@@ -1,6 +1,6 @@
 # Local Gstack Patches
 
-These are local changes in `/Users/tianhao/gstack` that the repo depends on for the current Outlook-first workflow.
+These are local changes in `~/gstack` that the repo depends on for the current Outlook-first workflow.
 
 ## Patched Files
 

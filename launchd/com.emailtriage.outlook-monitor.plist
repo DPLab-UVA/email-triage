@@ -7,7 +7,7 @@
     <key>ProgramArguments</key>
     <array>
       <string>/opt/homebrew/bin/python3</string>
-      <string>/Users/tianhao/Downloads/email-triage/browser/outlook_live_monitor.py</string>
+      <string>__REPO_ROOT__/browser/outlook_live_monitor.py</string>
       <string>watch</string>
       <string>--include-pinned</string>
       <string>--interval</string>
@@ -18,10 +18,10 @@
     <key>KeepAlive</key>
     <true/>
     <key>WorkingDirectory</key>
-    <string>/Users/tianhao/Downloads/email-triage</string>
+    <string>__REPO_ROOT__</string>
     <key>StandardOutPath</key>
-    <string>/Users/tianhao/Downloads/email-triage/shared/outlook_monitor.stdout.log</string>
+    <string>__REPO_ROOT__/shared/outlook_monitor.stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/tianhao/Downloads/email-triage/shared/outlook_monitor.stderr.log</string>
+    <string>__REPO_ROOT__/shared/outlook_monitor.stderr.log</string>
   </dict>
 </plist>

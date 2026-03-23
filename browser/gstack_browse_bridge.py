@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-GSTACK_ROOT = Path("/Users/tianhao/gstack")
+GSTACK_ROOT = Path(os.environ.get("GSTACK_ROOT", str(Path.home() / "gstack"))).expanduser()
 STATE_DIR = PROJECT_ROOT / ".gstack"
 DEFAULT_STATE_FILE = STATE_DIR / "bridge-browse.json"
 DEFAULT_TMUX_SESSION = "email-triage-browse"

@@ -228,7 +228,7 @@ def parse_reading_pane(message: dict[str, Any], pane_text: str) -> dict[str, Any
     body_lines = lines[body_start:]
     trimmed: list[str] = []
     for line in body_lines:
-        if line.startswith("From: tianhao@virginia.edu"):
+        if line.startswith("From:") and "@" in line:
             break
         if line == "[Draft]":
             break

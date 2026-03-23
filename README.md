@@ -135,9 +135,7 @@ That worked fine for fast prototyping, but it is not a great long-term storage m
 - it is easy to fragment state across too many files
 - it is harder to reason about history and feedback loops
 
-So the project now also mirrors key runtime events and state into a local SQLite database:
-
-- [`shared/email_triage.db`](/Users/tianhao/Downloads/email-triage/shared/email_triage.db)
+So the project now also mirrors key runtime events and state into a local SQLite database under `shared/email_triage.db`.
 
 The JSON and JSONL files still exist because they are simple and useful, but SQLite is the better foundation for the next version.
 
@@ -159,19 +157,19 @@ This matters because the system is trying to protect focus, not to hide informat
 If I have already checked `Night Review` and want the messages moved back to `Inbox`, I can do it explicitly with:
 
 ```bash
-python3 /Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py restore-now
+python3 browser/outlook_night_review.py restore-now
 ```
 
 If I want to restore everything currently visible in that folder:
 
 ```bash
-python3 /Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py restore-now --all-visible
+python3 browser/outlook_night_review.py restore-now --all-visible
 ```
 
 If I want to restore only messages Outlook is currently showing as read:
 
 ```bash
-python3 /Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py restore-now --only-read
+python3 browser/outlook_night_review.py restore-now --only-read
 ```
 
 In practice, I often just tell Codex to do it.
@@ -180,39 +178,39 @@ In practice, I often just tell Codex to do it.
 
 If you need to read code, start here:
 
-- [`browser/outlook_live_monitor.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_live_monitor.py)
-- [`browser/outlook_recent_triage.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_recent_triage.py)
-- [`browser/outlook_apply_triage.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_apply_triage.py)
-- [`browser/outlook_draft_helper.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_draft_helper.py)
-- [`browser/outlook_night_review.py`](/Users/tianhao/Downloads/email-triage/browser/outlook_night_review.py)
-- [`shared/triage_engine.py`](/Users/tianhao/Downloads/email-triage/shared/triage_engine.py)
-- [`shared/default_rules.json`](/Users/tianhao/Downloads/email-triage/shared/default_rules.json)
-- [`shared/sqlite_store.py`](/Users/tianhao/Downloads/email-triage/shared/sqlite_store.py)
+- `browser/outlook_live_monitor.py`
+- `browser/outlook_recent_triage.py`
+- `browser/outlook_apply_triage.py`
+- `browser/outlook_draft_helper.py`
+- `browser/outlook_night_review.py`
+- `shared/triage_engine.py`
+- `shared/default_rules.json`
+- `shared/sqlite_store.py`
 
 ## Start And Stop
 
 Start the monitor:
 
 ```bash
-/Users/tianhao/Downloads/email-triage/browser/outlook_monitor_tmux_ctl.sh start
+./browser/outlook_monitor_tmux_ctl.sh start
 ```
 
 Check status:
 
 ```bash
-/Users/tianhao/Downloads/email-triage/browser/outlook_monitor_tmux_ctl.sh status
+./browser/outlook_monitor_tmux_ctl.sh status
 ```
 
 See logs:
 
 ```bash
-/Users/tianhao/Downloads/email-triage/browser/outlook_monitor_tmux_ctl.sh logs
+./browser/outlook_monitor_tmux_ctl.sh logs
 ```
 
 Stop it:
 
 ```bash
-/Users/tianhao/Downloads/email-triage/browser/outlook_monitor_tmux_ctl.sh stop
+./browser/outlook_monitor_tmux_ctl.sh stop
 ```
 
 ## Design Philosophy

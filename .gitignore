@@ -28,3 +28,6 @@ shared/outlook_reply_style_*.json
 shared/triage_llm_cache.json
 shared/outlook-browser-captures/
 .gstack/
+skill-snapshots/
+docs/postdoc-hiring/
+shared/high_level_rule_summary.md

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Local Mail Triage"
-  short_description: "Work with the local Mail.app and Outlook Web triage prototype."
-  default_prompt: "Use $local-mail-triage to inspect local triage status, review tentative labels, poll Mail.app inboxes, and create local mail drafts on this Mac."

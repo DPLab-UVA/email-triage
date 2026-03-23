@@ -1,4 +1,0 @@
-interface:
-  display_name: "Paper Revision Workflow"
-  short_description: "Revise LaTeX papers with claim discipline"
-  default_prompt: "Revise this academic paper by aligning claims to evidence, tightening structure and prose, improving tables and figures, and compiling to verify the manuscript."

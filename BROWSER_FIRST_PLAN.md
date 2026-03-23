@@ -26,9 +26,9 @@ Build one local workflow that can:
 - Secondary capture path:
   `chrome-extension/`
 - Fallback API path:
-  `skill-snapshots/gmail-api-mail/`
+  external Gmail API tooling
 - Fallback local client path:
-  `mail-app/` and `skill-snapshots/mail-app-mailbox/`
+  `mail-app/`
 
 ## Immediate Next Steps
 
