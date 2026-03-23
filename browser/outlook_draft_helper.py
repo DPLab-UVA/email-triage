@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -37,6 +39,7 @@ from triage_engine import load_json, load_jsonl, triage_message  # noqa: E402
 DEFAULT_SUGGESTIONS = SHARED / "outlook_draft_suggestions.jsonl"
 DEFAULT_FEEDBACK = SHARED / "outlook_draft_feedback.jsonl"
 DEFAULT_STYLE_PROFILE = SHARED / "outlook_reply_style_profile.json"
+DEFAULT_DRAFT_SCHEMA = SHARED / "reply_draft_llm_schema.json"
 
 
 def bridge_cmd(command: str, *args: str, timeout: float = 30.0) -> str:
@@ -443,6 +446,120 @@ def compare_draft_to_final(suggested_text: str, final_text: str) -> dict[str, An
     }
 
 
+def clipped_text(value: str | None, max_chars: int) -> str:
+    text = normalize_reply_text(str(value or ""))
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + " ..."
+
+
+def run_codex_reply_draft(prompt: str, *, model: str, timeout_seconds: int) -> dict[str, Any]:
+    with tempfile.NamedTemporaryFile(prefix="reply-draft-", suffix=".json", delete=False) as handle:
+        output_path = Path(handle.name)
+    command = [
+        "/opt/homebrew/bin/codex",
+        "exec",
+        "-",
+        "--skip-git-repo-check",
+        "--cd",
+        str(SHARED.parent),
+        "--sandbox",
+        "read-only",
+        "--output-schema",
+        str(DEFAULT_DRAFT_SCHEMA),
+        "--output-last-message",
+        str(output_path),
+    ]
+    if model:
+        command.extend(["--model", model])
+    try:
+        result = subprocess.run(
+            command,
+            input=prompt,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=max(5, timeout_seconds),
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"codex exited {result.returncode}")
+        raw = output_path.read_text(encoding="utf-8").strip()
+        return json.loads(raw)
+    finally:
+        output_path.unlink(missing_ok=True)
+
+
+def llm_draft_reply(
+    message: dict[str, Any],
+    triage: dict[str, Any],
+    rules: dict[str, Any],
+    style_profile: dict[str, Any],
+) -> str:
+    cfg = rules.get("llm_drafts", {}) or {}
+    if not cfg.get("enabled"):
+        return ""
+
+    thread_text = message_body_for_model(message)
+    if not thread_text:
+        return ""
+
+    latest_self = normalize_reply_text(str(message.get("latest_self_body", "")))
+    tone_notes = style_profile.get("tone_notes", []) or []
+    avoid_phrases = style_profile.get("avoid_phrases", []) or []
+    prompt = f"""
+You are writing a short human email reply for Tianhao.
+
+Return exactly one JSON object matching the schema.
+
+Write like Tianhao:
+- concise
+- direct
+- polite
+- human, not corporate
+- no AI filler
+- no "Context:" line
+- do not default to "Noted." unless the message truly needs nothing else
+
+Style hints:
+{json.dumps(tone_notes, ensure_ascii=False, indent=2)}
+
+Avoid phrases:
+{json.dumps(avoid_phrases, ensure_ascii=False, indent=2)}
+
+Signoff to use:
+{style_signoff(style_profile, rules) or "Best,\\nTianhao"}
+
+Rules:
+- answer the sender's actual request directly in the first sentence
+- if the sender is asking permission, say yes/no clearly
+- ask at most one clarifying question, and only if needed
+- do not invent facts, timelines, or commitments not supported by the thread
+- keep the reply body short, normally 2-5 lines before the signoff
+- greeting is optional; include one only if it feels natural
+
+Message metadata:
+from: {message.get("from", "")}
+subject: {message.get("subject", "")}
+category: {triage.get("category", "")}
+triage_reason: {'; '.join(triage.get('reasons', []))}
+
+Latest incoming message:
+{clipped_text(thread_text, int(cfg.get("max_thread_chars", 6000)))}
+
+Latest reply from Tianhao in thread, if any:
+{clipped_text(latest_self, 1500)}
+""".strip()
+    try:
+        result = run_codex_reply_draft(
+            prompt,
+            model=str(cfg.get("model", "")).strip(),
+            timeout_seconds=int(cfg.get("timeout_seconds", 90)),
+        )
+    except Exception:
+        return ""
+    return normalize_reply_text(str(result.get("draft_reply", "")))
+
+
 def looks_automated_sender(sender: str) -> bool:
     value = (sender or "").lower()
     automated_hints = [
@@ -594,20 +711,20 @@ def default_opening(message: dict[str, Any], triage: dict[str, Any]) -> str:
     if "availability" in subject or "availability" in body:
         return "I can do that."
     if "budget" in subject or "budget" in body:
-        return "Noted."
+        return "Sounds good."
     if "flight" in body and "detail" in body:
         return "Thanks."
     if "reimburse" in subject or "reimburse" in body or "reimbursement" in subject:
         return "Yes, that works."
     if category == "deadline" or "action required" in subject or "attn required" in subject:
-        return "Noted."
+        return "Thanks."
     if category == "scheduling":
         return "I can do that."
     if category == "request":
         return "Yes, that works on my end."
     if "thank you" in body or "thanks" in body:
         return "Thanks."
-    return "Noted."
+    return "Thanks."
 
 
 def default_follow_up(message: dict[str, Any], triage: dict[str, Any]) -> str:
@@ -652,6 +769,9 @@ def draft_reply_for_message(
     if not reply_eligible(message, triage):
         return ""
     style_profile = style_profile or {}
+    llm_draft = llm_draft_reply(message, triage, rules, style_profile)
+    if llm_draft:
+        return llm_draft
     triage = {**triage, "style_profile": style_profile}
     opening = default_opening(message, triage)
     follow_up = default_follow_up(message, triage)

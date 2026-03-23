@@ -11,6 +11,12 @@
     "cache_path": "/Users/tianhao/Downloads/email-triage-lab/shared/triage_llm_cache.json",
     "max_body_chars": 5000
   },
+  "llm_drafts": {
+    "enabled": true,
+    "model": "gpt-5.4-mini",
+    "timeout_seconds": 90,
+    "max_thread_chars": 6000
+  },
   "decision_principles": [
     "Use rules only as broad guidance. The final decision should come from understanding the specific email.",
     "Prioritize personalized, human-to-human, actionable threads that affect research, students, collaborations, deadlines, logistics, travel, reimbursement, infrastructure, hiring, or concrete next steps.",

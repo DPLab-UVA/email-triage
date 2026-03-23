@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "draft_reply": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "draft_reply"
+  ]
+}
