@@ -1,0 +1,4 @@
+interface:
+  display_name: "Security Paper Reviewer"
+  short_description: "Write structured security paper reviews"
+  default_prompt: "Given one or more paper PDFs in the workspace, extract text, read for threat model/assumptions/evaluation/ethics, and draft conference-quality reviews with actionable strengths/weaknesses and a justified recommendation."

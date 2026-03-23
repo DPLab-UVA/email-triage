@@ -1,0 +1,7 @@
+interface:
+  display_name: "UVA Server Dev"
+  short_description: "Use UVA servers, pick the right compute target, and sync research code."
+  default_prompt: "Use $uva-server-dev to choose between DPLab and Rivanna, sync code, and run UVA server experiments safely."
+
+policy:
+  allow_implicit_invocation: true
