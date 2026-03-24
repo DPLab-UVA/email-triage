@@ -1,5 +1,5 @@
 {
-  "policy_version": 5,
+  "policy_version": 6,
   "priority_threshold": 4,
   "monitor_source_folder": "Inbox",
   "monitor_scan_screens": 1,
@@ -26,6 +26,8 @@
     "Automated, bulk, or system-generated emails can still be important notifications, but they almost never need a reply draft.",
     "Administrative workflow emails that clearly ask for an approval action, such as expense reports submitted on the user's behalf, are important but should be handled via action automation instead of reply drafts.",
     "Hiring-related emails are not all equally important. Personalized, credible outreach or strong candidate/application threads matter more than generic recruiting blasts.",
+    "Do not trust sender-set Outlook importance markers, buzzword-heavy subject lines, or self-declared urgency as evidence that an email matters.",
+    "Prospective student or PhD outreach should stay skeptical by default. Generic or low-credibility outreach, unclear school/background, or thin personalization should usually go to Night Review instead of notifying immediately.",
     "Invitation, speaker, or collaboration emails should be judged by sincerity, specificity, and whether the sender is clearly asking the user to do something soon.",
     "When in doubt, distinguish between keep-in-inbox-and-notify versus move-to-night-review; do not overfit to isolated keywords."
   ],

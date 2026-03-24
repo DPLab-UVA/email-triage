@@ -29,10 +29,14 @@ from outlook_web_workflow import (
     ensure_outlook_session,
 )
 sys.path.append(str(SHARED))
-from sqlite_store import mirror_jsonl_append, mirror_state  # noqa: E402
+from sqlite_store import (  # noqa: E402
+    append_event,
+    load_state_snapshot,
+    save_state_snapshot,
+)
 
-DEFAULT_STATE = SHARED / "outlook_night_review_state.json"
-DEFAULT_EVENT_LOG = SHARED / "outlook_night_review_events.jsonl"
+DEFAULT_STATE = "outlook_night_review_state"
+DEFAULT_EVENT_LOG = "outlook_night_review_events"
 
 
 def bridge_cmd(command: str, *args: str, timeout: float = 30.0) -> str:
@@ -62,7 +66,8 @@ def today_key(now: datetime | None = None) -> str:
 
 
 def load_state(path: Path) -> dict[str, Any]:
-    if not path.exists():
+    raw_state = load_state_snapshot(path)
+    if raw_state is None:
         return {
             "created_at": now_iso(),
             "updated_at": "",
@@ -73,7 +78,7 @@ def load_state(path: Path) -> dict[str, Any]:
             "last_run": {},
         }
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
+        state = raw_state
         pending = {}
         for raw_key, record in dict(state.get("pending", {})).items():
             migrated = dict(record)
@@ -103,16 +108,11 @@ def load_state(path: Path) -> dict[str, Any]:
 
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    mirror_state(path, state)
+    save_state_snapshot(path, state)
 
 
 def append_jsonl(path: Path, row: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    mirror_jsonl_append(path, row)
+    append_event(path, row)
 
 
 def message_key(row: dict[str, Any]) -> str:

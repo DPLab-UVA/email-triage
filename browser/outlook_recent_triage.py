@@ -224,6 +224,36 @@ def top_cursor_keys(*, limit: int, recent_only: bool) -> list[str]:
     return keys
 
 
+def merge_visible_batch(
+    collected: list[dict[str, Any]],
+    seen: set[str],
+    batch: list[dict[str, Any]],
+    *,
+    limit: int,
+    stop_keys: set[str] | None = None,
+) -> tuple[bool, bool]:
+    stop_keys = {key for key in (stop_keys or set()) if key}
+    stop_hit = False
+    limit_hit = False
+    for parsed in batch:
+        key = str(parsed.get("cursor_key", "")).strip()
+        if stop_keys and key in stop_keys:
+            # Pinned/old rows often sit at the top of Inbox. Skip those until
+            # we have collected at least one genuinely new row below them.
+            if collected:
+                stop_hit = True
+                break
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        collected.append(parsed)
+        if len(collected) >= limit:
+            limit_hit = True
+            break
+    return stop_hit, limit_hit
+
+
 def fetch_recent_messages(
     *,
     screens: int,
@@ -251,18 +281,16 @@ def fetch_recent_messages(
                 if recent_only and not parsed.get("received_at"):
                     continue
                 row_source.append(parsed)
-        for parsed in row_source:
-            key = str(parsed.get("cursor_key", "")).strip()
-            if stop_keys and key in stop_keys:
-                stop_hit = True
-                break
-            if key in seen:
-                continue
-            seen.add(key)
-            collected.append(parsed)
-            if len(collected) >= limit:
-                reset_message_list_scroll()
-                return collected
+        stop_hit, limit_hit = merge_visible_batch(
+            collected,
+            seen,
+            row_source,
+            limit=limit,
+            stop_keys=stop_keys,
+        )
+        if limit_hit:
+            reset_message_list_scroll()
+            return collected
 
         if stop_hit:
             break

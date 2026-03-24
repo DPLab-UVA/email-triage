@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SQLite mirror store for local runtime state and event logs."""
+"""SQLite runtime store for local state snapshots and event streams."""
 
 from __future__ import annotations
 
@@ -77,6 +77,19 @@ def payload_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
 
 
+def storage_name(ref: str | Path) -> str:
+    if isinstance(ref, Path):
+        return ref.stem
+    text = str(ref).strip()
+    if text.endswith(".json") or text.endswith(".jsonl"):
+        return Path(text).stem
+    return text
+
+
+def storage_source(ref: str | Path) -> str:
+    return str(ref)
+
+
 def migrate_missing_hashes(conn: sqlite3.Connection) -> None:
     rows = conn.execute(
         "SELECT id, payload_json FROM events WHERE payload_hash IS NULL OR payload_hash = ''"
@@ -125,7 +138,95 @@ def event_message_key(row: dict[str, Any]) -> str:
     return ""
 
 
-def mirror_jsonl_append(path: Path, row: dict[str, Any], *, db_path: Path = DEFAULT_DB) -> None:
+def load_state_snapshot(path: str | Path, *, db_path: Path = DEFAULT_DB) -> dict[str, Any] | None:
+    try:
+        with connect(db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT payload_json
+                FROM state_snapshots
+                WHERE state_name = ?
+                """,
+                (storage_name(path),),
+            ).fetchone()
+        if row and row["payload_json"]:
+            return json.loads(row["payload_json"])
+    except Exception:
+        pass
+    return None
+
+
+def save_state_snapshot(
+    path: str | Path,
+    payload: dict[str, Any],
+    *,
+    db_path: Path = DEFAULT_DB,
+) -> None:
+    mirror_state(path, payload, db_path=db_path)
+
+
+def append_event(
+    path: str | Path,
+    row: dict[str, Any],
+    *,
+    db_path: Path = DEFAULT_DB,
+) -> None:
+    mirror_jsonl_append(path, row, db_path=db_path)
+
+
+def load_recent_event_rows(path: str | Path, limit: int = 5, *, db_path: Path = DEFAULT_DB) -> list[dict[str, Any]]:
+    try:
+        with connect(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM events
+                WHERE stream = ?
+                ORDER BY ts DESC, id DESC
+                LIMIT ?
+                """,
+                (storage_name(path), max(1, int(limit))),
+            ).fetchall()
+        payloads: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payloads.append(json.loads(row["payload_json"]))
+            except json.JSONDecodeError:
+                continue
+        if payloads:
+            payloads.reverse()
+            return payloads
+    except Exception:
+        pass
+    return []
+
+
+def load_event_rows(path: str | Path, *, db_path: Path = DEFAULT_DB) -> list[dict[str, Any]]:
+    try:
+        with connect(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT payload_json
+                FROM events
+                WHERE stream = ?
+                ORDER BY ts ASC, id ASC
+                """,
+                (storage_name(path),),
+            ).fetchall()
+        payloads: list[dict[str, Any]] = []
+        for row in rows:
+            try:
+                payloads.append(json.loads(row["payload_json"]))
+            except json.JSONDecodeError:
+                continue
+        if payloads:
+            return payloads
+    except Exception:
+        pass
+    return []
+
+
+def mirror_jsonl_append(path: str | Path, row: dict[str, Any], *, db_path: Path = DEFAULT_DB) -> None:
     try:
         with connect(db_path) as conn:
             conn.execute(
@@ -143,8 +244,8 @@ def mirror_jsonl_append(path: Path, row: dict[str, Any], *, db_path: Path = DEFA
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    path.stem,
-                    str(path),
+                    storage_name(path),
+                    storage_source(path),
                     event_timestamp(row, fallback=now_iso()),
                     payload_hash(row),
                     event_message_key(row),
@@ -160,7 +261,7 @@ def mirror_jsonl_append(path: Path, row: dict[str, Any], *, db_path: Path = DEFA
         return
 
 
-def mirror_state(path: Path, payload: dict[str, Any], *, db_path: Path = DEFAULT_DB) -> None:
+def mirror_state(path: str | Path, payload: dict[str, Any], *, db_path: Path = DEFAULT_DB) -> None:
     try:
         updated_at = str(payload.get("updated_at", "")).strip() or now_iso()
         with connect(db_path) as conn:
@@ -174,8 +275,8 @@ def mirror_state(path: Path, payload: dict[str, Any], *, db_path: Path = DEFAULT
                   payload_json=excluded.payload_json
                 """,
                 (
-                    path.stem,
-                    str(path),
+                    storage_name(path),
+                    storage_source(path),
                     updated_at,
                     json.dumps(payload, ensure_ascii=False),
                 ),

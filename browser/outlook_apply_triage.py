@@ -27,10 +27,10 @@ from outlook_web_workflow import (
     ensure_outlook_session,
 )
 sys.path.append(str(SHARED))
-from sqlite_store import mirror_jsonl_append  # noqa: E402
+from sqlite_store import append_event  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ACTION_LOG = SHARED / "outlook_move_actions.jsonl"
+DEFAULT_ACTION_LOG = "outlook_move_actions"
 
 
 def bridge_js(expr: str, *, timeout: float = 30.0) -> str:
@@ -47,10 +47,7 @@ def bridge_json(expr: str, *, timeout: float = 30.0) -> Any:
 
 
 def append_jsonl(path: Path, row: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    mirror_jsonl_append(path, row)
+    append_event(path, row)
 
 
 def folder_exists(folder_name: str) -> bool:

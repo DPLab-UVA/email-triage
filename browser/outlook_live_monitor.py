@@ -48,6 +48,14 @@ from outlook_recent_triage import (
     wait_for_visible_options,
 )
 from outlook_reply_style import DEFAULT_SAMPLES as DEFAULT_STYLE_SAMPLES, refresh_style_profile
+from outlook_wake_hook import (
+    DEFAULT_WAKE_EVENT_LOG,
+    DEFAULT_WAKE_HOST,
+    DEFAULT_WAKE_PORT,
+    WakeSignalServer,
+    install_outlook_wake_hook,
+    read_wake_hook_state,
+)
 from outlook_web_workflow import (
     DEFAULT_BROWSER,
     DEFAULT_COOKIE_DOMAINS,
@@ -55,10 +63,15 @@ from outlook_web_workflow import (
     ensure_outlook_session,
 )
 sys.path.append(str(SHARED))
-from sqlite_store import mirror_jsonl_append, mirror_state  # noqa: E402
+from sqlite_store import (  # noqa: E402
+    append_event,
+    load_recent_event_rows,
+    load_state_snapshot,
+    save_state_snapshot,
+)
 
-DEFAULT_STATE = SHARED / "outlook_monitor_state.json"
-DEFAULT_EVENT_LOG = SHARED / "outlook_monitor_events.jsonl"
+DEFAULT_STATE = "outlook_monitor_state"
+DEFAULT_EVENT_LOG = "outlook_monitor_events"
 
 
 def now_iso() -> str:
@@ -66,7 +79,8 @@ def now_iso() -> str:
 
 
 def load_state(path: Path) -> dict[str, Any]:
-    if not path.exists():
+    raw_state = load_state_snapshot(path)
+    if raw_state is None:
         return {
             "created_at": now_iso(),
             "updated_at": "",
@@ -79,7 +93,7 @@ def load_state(path: Path) -> dict[str, Any]:
             "last_run": {},
         }
     try:
-        state = json.loads(path.read_text(encoding="utf-8"))
+        state = raw_state
         if int(state.get("key_schema_version", 1)) < 2:
             state["initialized"] = False
             state["seen_keys"] = []
@@ -109,32 +123,82 @@ def load_state(path: Path) -> dict[str, Any]:
 
 
 def save_state(path: Path, state: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    mirror_state(path, state)
+    save_state_snapshot(path, state)
 
 
 def append_jsonl(path: Path, row: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    mirror_jsonl_append(path, row)
+    append_event(path, row)
 
 
 def load_recent_events(path: Path, limit: int = 5) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    rows: list[dict[str, Any]] = []
-    for line in lines[-limit:]:
-        stripped = line.strip()
-        if not stripped:
-            continue
+    return load_recent_event_rows(path, limit=limit)
+
+
+def defer_llm_fallback(
+    *,
+    event: dict[str, Any],
+    state: dict[str, Any],
+    key: str,
+    max_seen: int,
+    max_retries: int,
+) -> dict[str, Any]:
+    event["action"] = "hold-in-inbox"
+    attempt = increment_attempt(state, key)
+    event["attempt"] = attempt
+    if attempt >= max_retries:
+        event["status"] = "llm-fallback-max-retries"
+        mark_seen(state, key, max_seen=max_seen)
+        clear_attempt(state, key)
+    else:
+        event["status"] = "llm-fallback-deferred"
+    return event
+
+
+def wait_for_wake_trigger(
+    *,
+    timeout_seconds: float,
+    probe_interval_seconds: float,
+    wake_server: WakeSignalServer | None,
+    last_hook_seq: int,
+) -> tuple[int, dict[str, Any] | None]:
+    deadline = time.time() + max(0.0, timeout_seconds)
+    current_seq = max(0, int(last_hook_seq))
+    probe_interval_seconds = max(0.5, float(probe_interval_seconds))
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return current_seq, None
+        wait_slice = min(probe_interval_seconds, remaining)
+        if wake_server is not None:
+            signal = wake_server.wait(timeout=wait_slice)
+            if signal is not None:
+                return current_seq, {
+                    "timestamp": now_iso(),
+                    "action": "wake-signal",
+                    "status": "received",
+                    **signal.as_dict(),
+                }
+        else:
+            time.sleep(wait_slice)
         try:
-            rows.append(json.loads(stripped))
-        except json.JSONDecodeError:
+            hook_state = read_wake_hook_state()
+        except Exception:
             continue
-    return rows
+        seq = int(hook_state.get("seq", 0) or 0)
+        if seq > current_seq:
+            current_seq = seq
+            return current_seq, {
+                "timestamp": now_iso(),
+                "action": "wake-signal",
+                "status": "page-hook",
+                "reason": str(hook_state.get("lastReason", "")),
+                "fingerprint": str(hook_state.get("lastFingerprintPreview", "")),
+                "source": "outlook-dom-hook-state",
+                "path": "page-hook",
+                "method": "observer",
+                "seq": current_seq,
+            }
+        current_seq = max(current_seq, seq)
 
 
 def message_key(row: dict[str, Any]) -> str:
@@ -330,21 +394,34 @@ def run_cycle(
                         "action": full_triage.get("action", ""),
                         "reasons": full_triage.get("reasons", []),
                         "llm_judgment": full_triage.get("llm_judgment", {}),
+                        "decision_source": full_triage.get("decision_source", ""),
+                        "needs_manual_review": bool(full_triage.get("needs_manual_review")),
                     }
             except Exception as exc:
                 event["draft_prep_error"] = str(exc)
-            if full_message and full_triage and str(full_triage.get("draft_reply", "")).strip():
+            if full_triage and str(full_triage.get("decision_source", "")) == "llm-fallback":
+                event["outlook_draft"] = {
+                    "ok": False,
+                    "reason": "llm-fallback-no-draft",
+                }
+                event["status"] = "logged" if not notify else ("notified" if notify_user(row, str(row.get("reason", ""))) else "notify-failed")
+            elif full_message and full_triage and str(full_triage.get("draft_reply", "")).strip():
                 event["outlook_draft"] = open_outlook_reply_draft(full_message, full_triage)
+                if notify:
+                    notified = notify_user(row, str(row.get("reason", "")))
+                    event["status"] = "notified" if notified else "notify-failed"
+                else:
+                    event["status"] = "logged"
             else:
                 event["outlook_draft"] = {
                     "ok": False,
                     "reason": "no-draft-reply-after-full-thread-parse",
                 }
-            if notify:
-                notified = notify_user(row, str(row.get("reason", "")))
-                event["status"] = "notified" if notified else "notify-failed"
-            else:
-                event["status"] = "logged"
+                if notify:
+                    notified = notify_user(row, str(row.get("reason", "")))
+                    event["status"] = "notified" if notified else "notify-failed"
+                else:
+                    event["status"] = "logged"
             if event["status"] == "notified":
                 payload["important_notified"] += 1
             mark_seen(state, key, max_seen=max_seen)
@@ -375,7 +452,21 @@ def run_cycle(
                             "action": full_triage.get("action", ""),
                             "reasons": full_triage.get("reasons", []),
                             "llm_judgment": full_triage.get("llm_judgment", {}),
+                            "decision_source": full_triage.get("decision_source", ""),
+                            "needs_manual_review": bool(full_triage.get("needs_manual_review")),
                         }
+                        if str(full_triage.get("decision_source", "")) == "llm-fallback":
+                            defer_llm_fallback(
+                                event=event,
+                                state=state,
+                                key=key,
+                                max_seen=max_seen,
+                                max_retries=max_retries,
+                            )
+                            payload["events"].append(event)
+                            append_jsonl(event_log, event)
+                            seen = set(state.get("seen_keys", []))
+                            continue
                         if full_triage.get("important"):
                             event["action"] = "notify-after-recheck"
                             if str(full_triage.get("draft_reply", "")).strip():
@@ -536,6 +627,16 @@ def command_run_once(args: argparse.Namespace) -> int:
 
 def command_watch(args: argparse.Namespace) -> int:
     interval = max(10, int(args.interval))
+    wake_probe_interval = max(1.0, float(args.wake_probe_interval))
+    wake_server: WakeSignalServer | None = None
+    last_hook_seq = 0
+    if not args.no_wake_hook:
+        wake_server = WakeSignalServer(
+            host=args.wake_host,
+            port=args.wake_port,
+            event_log=Path(args.wake_event_log),
+        )
+        wake_server.start()
     while True:
         try:
             payload = run_cycle(
@@ -555,8 +656,16 @@ def command_watch(args: argparse.Namespace) -> int:
                 night_review_state_path=Path(args.night_review_state),
                 night_review_event_log=Path(args.night_review_event_log),
             )
+            if wake_server is not None:
+                payload["wake_hook"] = install_outlook_wake_hook(
+                    host=args.wake_host,
+                    port=args.wake_port,
+                )
+                last_hook_seq = max(last_hook_seq, int(payload["wake_hook"].get("seq", 0) or 0))
             print(json.dumps(payload, ensure_ascii=False), flush=True)
         except KeyboardInterrupt:
+            if wake_server is not None:
+                wake_server.stop()
             return 0
         except Exception as exc:
             error_event = {
@@ -567,7 +676,20 @@ def command_watch(args: argparse.Namespace) -> int:
             }
             append_jsonl(Path(args.event_log), error_event)
             print(json.dumps(error_event, ensure_ascii=False), flush=True)
-        time.sleep(interval)
+        if args.no_wake_hook:
+            time.sleep(interval)
+            continue
+        last_hook_seq, wake_event = wait_for_wake_trigger(
+            timeout_seconds=interval,
+            probe_interval_seconds=wake_probe_interval,
+            wake_server=wake_server,
+            last_hook_seq=last_hook_seq,
+        )
+        if wake_event is not None:
+            print(
+                json.dumps(wake_event, ensure_ascii=False),
+                flush=True,
+            )
 
 
 def command_status(args: argparse.Namespace) -> int:
@@ -599,6 +721,7 @@ def build_parser() -> argparse.ArgumentParser:
         subparser.add_argument("--feedback", default=str(DEFAULT_FEEDBACK))
         subparser.add_argument("--night-review-state", default=str(DEFAULT_NIGHT_REVIEW_STATE))
         subparser.add_argument("--night-review-event-log", default=str(DEFAULT_NIGHT_REVIEW_EVENT_LOG))
+        subparser.add_argument("--wake-event-log", default=str(DEFAULT_WAKE_EVENT_LOG))
         subparser.add_argument("--no-notify", action="store_true")
         subparser.add_argument("--no-bootstrap-seen", action="store_true")
         subparser.add_argument("--max-seen", type=int, default=500)
@@ -611,6 +734,10 @@ def build_parser() -> argparse.ArgumentParser:
     watch = subparsers.add_parser("watch", help="Continuously poll Outlook Web and handle new mail.")
     add_common_arguments(watch)
     watch.add_argument("--interval", type=int, default=30, help="Polling interval in seconds.")
+    watch.add_argument("--no-wake-hook", action="store_true", help="Disable the page-side wake hook and use pure polling.")
+    watch.add_argument("--wake-host", default=DEFAULT_WAKE_HOST)
+    watch.add_argument("--wake-port", type=int, default=DEFAULT_WAKE_PORT)
+    watch.add_argument("--wake-probe-interval", type=float, default=2.0, help="How often to check the page-side wake observer between full cycles.")
     watch.set_defaults(func=command_watch)
 
     status = subparsers.add_parser("status", help="Show monitor state and recent events.")

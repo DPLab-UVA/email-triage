@@ -25,6 +25,20 @@ The core goal is simple:
 - low-priority mail should be moved into `Night Review`
 - when something clearly needs a reply, the system should prepare a real Outlook draft so I can just send it, edit it, or delete it
 
+## Architecture
+
+The short version:
+
+- Outlook Web is the mail surface
+- a local browser-control bridge drives the page
+- a local monitor watches recent Inbox rows
+- a page-side wake hook lets the monitor react quickly when the Inbox DOM changes
+- broad rules plus Codex decide what matters
+- actions happen directly inside Outlook Web
+- SQLite is now the runtime store
+
+There is a fuller architecture write-up, with a diagram, in [ARCHITECTURE.md](/Users/tianhao/Downloads/email-triage/ARCHITECTURE.md).
+
 ## What I Tried Before Landing Here
 
 This repo is not the first attempt.
@@ -94,8 +108,8 @@ You should expect to need:
 
 In practice, this repo was developed alongside local skills and browser tooling such as:
 
-- Atlas, as a visible browser/session holder when that route is useful
-- gstack browse, as the more practical page-control layer
+- gstack browse, as the practical page-control layer
+- Atlas, only as an optional visible session helper when that route is useful
 - local Codex skills that help drive browser and mail workflows on this machine
 
 This is not meant to be plug-and-play for a random laptop. It is a personal system first.
@@ -127,17 +141,27 @@ So this repo is unapologetically pragmatic.
 
 ## Storage
 
-Originally, most local runtime data lived in scattered `json` and `jsonl` files under `shared/`.
+The runtime storage model is now SQLite-only for runtime state and events.
 
-That worked fine for fast prototyping, but it is not a great long-term storage model because:
+Key runtime state and event streams are stored in:
 
-- it is annoying to query
-- it is easy to fragment state across too many files
-- it is harder to reason about history and feedback loops
+- `shared/email_triage.db`
 
-So the project now also mirrors key runtime events and state into a local SQLite database under `shared/email_triage.db`.
+Configuration files and a few hand-maintained inputs still live as files, but the monitor, Night Review state, wake events, draft feedback, and related runtime streams now live in SQLite instead of growing local `json/jsonl` logs.
 
-The JSON and JSONL files still exist because they are simple and useful, but SQLite is the better foundation for the next version.
+## Wake-Up Model
+
+The monitor is no longer just "wait 30 seconds and check again."
+
+The current design is:
+
+- inject a page-side observer into the controlled Outlook tab
+- let that observer notice Inbox DOM changes
+- probe that page-side wake state cheaply between full monitor cycles
+- run a full triage cycle immediately when the observer state changes
+
+So the expensive part still runs as a normal cycle, but the waiting behavior is much more event-driven than before.
+The old interval is now mainly a fallback, not the only way new mail gets noticed.
 
 ## How I Actually Use It
 

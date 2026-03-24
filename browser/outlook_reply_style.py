@@ -6,16 +6,19 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from collections import Counter
 from pathlib import Path
 from statistics import median
 
 from outlook_night_review import fetch_folder_messages
 from outlook_recent_triage import SHARED, clean_line
+sys.path.append(str(SHARED))
+from sqlite_store import load_event_rows, save_state_snapshot
 
-DEFAULT_SAMPLES = SHARED / "outlook_reply_style_samples.json"
-DEFAULT_PROFILE = SHARED / "outlook_reply_style_profile.json"
-DEFAULT_FEEDBACK = SHARED / "outlook_draft_feedback.jsonl"
+DEFAULT_SAMPLES = "outlook_reply_style_samples"
+DEFAULT_PROFILE = "outlook_reply_style_profile"
+DEFAULT_FEEDBACK = "outlook_draft_feedback"
 
 TIME_PREFIX_RE = re.compile(
     r"^(?:Today|Yesterday|Mon|Tue|Wed|Thu|Fri|Sat|Sun|\d{1,2}/\d{1,2}/\d{2,4})?\s*\d{1,2}:\d{2}\s?[AP]M\s+",
@@ -70,17 +73,9 @@ def detect_follow_up(text: str) -> str:
 
 
 def load_feedback_rows(path: Path) -> list[dict[str, str]]:
-    if not path.exists():
-        return []
     rows: list[dict[str, str]] = []
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            rows.append(json.loads(stripped))
-        except json.JSONDecodeError:
-            continue
+    for row in load_event_rows(path):
+        rows.append(row)
     return rows
 
 
@@ -216,9 +211,8 @@ def refresh_style_profile(
     feedback_rows = load_feedback_rows(feedback_path)
     profile = infer_profile(samples, feedback_rows)
 
-    samples_output.parent.mkdir(parents=True, exist_ok=True)
-    samples_output.write_text(json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8")
-    profile_output.write_text(json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8")
+    save_state_snapshot(samples_output, {"updated_at": profile["generated_at"], "samples": samples})
+    save_state_snapshot(profile_output, profile)
 
     return {
         "sample_count": len(samples),

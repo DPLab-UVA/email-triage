@@ -167,6 +167,21 @@ def infer_category(subject: str, body: str) -> str:
     if any(
         token in text
         for token in [
+            "phd inquiry",
+            "ph.d. inquiry",
+            "prospective phd",
+            "prospective ph.d.",
+            "prospective student",
+            "phd position",
+            "fall 2026/spring 27",
+            "spring 27",
+            "spring 2027",
+        ]
+    ):
+        return "phd_outreach"
+    if any(
+        token in text
+        for token in [
             "reimbursement",
             "budget clarification",
             "travel reimbursement",
@@ -434,6 +449,7 @@ Hard boundaries already handled elsewhere:
 - publication/review invitations can be auto-declined upstream
 - pinned mail is kept separately
 - automated mail should almost never need a reply draft
+- sender-set Outlook importance markers or self-declared urgency are weak evidence and should not drive the decision
 
 Broad decision principles:
 {broad_policy_summary(rules)}
@@ -458,6 +474,7 @@ Rules for needs_reply:
 - true only if this is likely a human thread that deserves a near-term human reply
 - false for automated, mass, bulk, newsletter, alert, or generic notification emails
 - if the sender is explicitly asking about meeting time, availability, or scheduling a near-term conversation, bias strongly toward true
+- for prospective-student / PhD outreach, default to false unless the message is clearly credible, well-personalized, and worth engaging now
 """.strip()
 
     decision = run_codex_llm_judge(
@@ -573,6 +590,9 @@ def heuristic_triage(message: dict[str, Any], rules: dict[str, Any], examples: l
     if human_sender and category in {"finance_admin", "hiring", "infrastructure", "speaker_logistics", "collaboration"}:
         score += 2.5
         reasons.append(f"human-thread category: {category}")
+    if category == "phd_outreach":
+        score -= 0.5
+        reasons.append("prospective-student outreach needs stronger credibility/personalization to justify notification")
     actionable_hints = [
         "can you",
         "could you",
@@ -648,6 +668,15 @@ def apply_llm_decision(message: dict[str, Any], rules: dict[str, Any], heuristic
     }
 
 
+def llm_fallback_decision(heuristic: dict[str, Any], exc: Exception) -> dict[str, Any]:
+    fallback = dict(heuristic)
+    fallback["reasons"] = [*heuristic.get("reasons", []), f"llm fallback: {exc}"]
+    fallback["decision_source"] = "llm-fallback"
+    fallback["draft_reply"] = ""
+    fallback["needs_manual_review"] = True
+    return fallback
+
+
 def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: list[dict[str, Any]]) -> dict[str, Any]:
     heuristic = heuristic_triage(message, rules, examples)
     if heuristic.get("decision_source") == "rule":
@@ -655,8 +684,7 @@ def triage_message(message: dict[str, Any], rules: dict[str, Any], examples: lis
     try:
         llm_decision = llm_judge_message(message, rules, examples, heuristic)
     except Exception as exc:
-        heuristic.setdefault("reasons", []).append(f"llm fallback: {exc}")
-        return heuristic
+        return llm_fallback_decision(heuristic, exc)
     if not llm_decision:
         return heuristic
     return apply_llm_decision(message, rules, heuristic, llm_decision)

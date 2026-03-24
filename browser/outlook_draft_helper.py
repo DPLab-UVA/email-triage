@@ -35,11 +35,11 @@ from outlook_web_workflow import (
 sys.path.append(str(SHARED))
 
 from triage_engine import load_json, load_jsonl, triage_message  # noqa: E402
-from sqlite_store import mirror_jsonl_append  # noqa: E402
+from sqlite_store import append_event, load_event_rows, load_state_snapshot  # noqa: E402
 
-DEFAULT_SUGGESTIONS = SHARED / "outlook_draft_suggestions.jsonl"
-DEFAULT_FEEDBACK = SHARED / "outlook_draft_feedback.jsonl"
-DEFAULT_STYLE_PROFILE = SHARED / "outlook_reply_style_profile.json"
+DEFAULT_SUGGESTIONS = "outlook_draft_suggestions"
+DEFAULT_FEEDBACK = "outlook_draft_feedback"
+DEFAULT_STYLE_PROFILE = "outlook_reply_style_profile"
 DEFAULT_DRAFT_SCHEMA = SHARED / "reply_draft_llm_schema.json"
 
 
@@ -71,10 +71,7 @@ def ensure_session_ready() -> None:
 
 
 def append_jsonl(path: Path, row: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-    mirror_jsonl_append(path, row)
+    append_event(path, row)
 
 
 def useful_lines(text: str) -> list[str]:
@@ -300,17 +297,7 @@ def save_suggestion(path: Path, message: dict[str, Any], triage: dict[str, Any],
 
 
 def latest_suggestion(path: Path, *, subject: str, sender: str = "") -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    for line in reversed(lines):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            row = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
+    for row in reversed(load_event_rows(path)):
         if row.get("subject") != subject:
             continue
         if sender and row.get("from") != sender:
@@ -326,17 +313,7 @@ def find_suggestion(
     subject: str = "",
     sender: str = "",
 ) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
-    for line in reversed(lines):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            row = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
+    for row in reversed(load_event_rows(path)):
         if conversation_id and row.get("conversation_id") == conversation_id:
             return row
         if subject and row.get("subject") != subject:
@@ -378,12 +355,8 @@ def save_feedback(
 
 
 def load_style_profile(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
+    payload = load_state_snapshot(path)
+    return payload if isinstance(payload, dict) else {}
 
 
 def message_body_for_model(message: dict[str, Any]) -> str:
@@ -418,16 +391,7 @@ def feedback_identity(record: dict[str, Any]) -> str:
 
 def load_feedback_identities(path: Path) -> set[str]:
     identities: set[str] = set()
-    if not path.exists():
-        return identities
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        try:
-            row = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
+    for row in load_event_rows(path):
         identities.add(feedback_identity(row))
     return identities
 

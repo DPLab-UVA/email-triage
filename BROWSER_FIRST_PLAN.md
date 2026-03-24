@@ -78,27 +78,27 @@ Build one local workflow that can:
   - action-layer script: `browser/outlook_apply_triage.py`
 - A live poller now exists for Outlook Web:
   - monitor script: `browser/outlook_live_monitor.py`
-  - state file: `shared/outlook_monitor_state.json`
-  - event log: `shared/outlook_monitor_events.jsonl`
+  - state snapshot: `outlook_monitor_state` in SQLite
+  - event stream: `outlook_monitor_events` in SQLite
   - launchd wrapper: `launchd/outlook_monitor_ctl.sh`
   - tmux wrapper: `browser/outlook_monitor_tmux_ctl.sh`
 - A Night Review queue manager now exists:
   - helper script: `browser/outlook_night_review.py`
-  - state file: `shared/outlook_night_review_state.json`
-  - event log: `shared/outlook_night_review_events.jsonl`
+  - state snapshot: `outlook_night_review_state` in SQLite
+  - event stream: `outlook_night_review_events` in SQLite
   - supports:
     - bootstrapping existing `Night Review` mail into pending state
     - one nightly reminder for pending low-priority mail
     - next-morning restore to `Inbox` if the carried-over Night Review items are all read
 - A draft helper now exists for Outlook Web:
   - helper script: `browser/outlook_draft_helper.py`
-  - suggestion log: `shared/outlook_draft_suggestions.jsonl`
-  - feedback log: `shared/outlook_draft_feedback.jsonl`
+  - suggestion stream: `outlook_draft_suggestions` in SQLite
+  - feedback stream: `outlook_draft_feedback` in SQLite
   - supports selected-message extraction, folder-level draft suggestion, reply draft injection, explicit feedback logging, and send-time feedback logging
 - A lightweight style learner now exists for Outlook replies:
   - helper script: `browser/outlook_reply_style.py`
   - reads recent `Sent Items` previews
-  - writes a local reply-style profile used to make drafts shorter and less AI-like
+  - writes reply-style profile artifacts into SQLite so drafts become shorter and less AI-like
 - Atlas is now confirmed as a live visible Outlook session holder:
   - the Atlas app already has logged-in Outlook tabs
   - helper file: `browser/atlas_outlook_helper.py`

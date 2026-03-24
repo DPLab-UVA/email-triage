@@ -12,6 +12,8 @@
       <string>--include-pinned</string>
       <string>--interval</string>
       <string>30</string>
+      <string>--wake-probe-interval</string>
+      <string>2</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
