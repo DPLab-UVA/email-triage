@@ -162,6 +162,18 @@ def selected_subject() -> str:
     return str(selected_row().get("subject", "")).strip()
 
 
+def clip_thread_lines(lines: list[str]) -> list[str]:
+    for idx, line in enumerate(lines):
+        next_line = lines[idx + 1] if idx + 1 < len(lines) else ""
+        if line == "Send" and next_line == "Discard":
+            return lines[:idx]
+        if line.startswith("Draft saved"):
+            return lines[:idx]
+        if line in {"My Day", "Notifications", "Settings", "Teams Chat"}:
+            return lines[:idx]
+    return lines
+
+
 def reading_pane_text() -> str:
     expr = """
 JSON.stringify(
@@ -213,6 +225,7 @@ def parse_reading_pane(message: dict[str, Any], pane_text: str) -> dict[str, Any
     if subject in lines:
         start_idx = lines.index(subject)
     lines = lines[start_idx:]
+    lines = clip_thread_lines(lines)
 
     body_start = 0
     for idx, line in enumerate(lines):
